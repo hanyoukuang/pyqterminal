@@ -30,8 +30,30 @@ uv sync
 
 ## Usage
 
+### Interactive mode (default)
+
 ```bash
 uv run python main.py
+```
+
+### Display-only mode
+
+Use Kai as a pure terminal display — pipe escape sequences from external sources (SSH, logs, etc.) without a local shell:
+
+```bash
+# Pipe ANSI output to Kai
+echo -e '\x1b[31mHello\x1b[0m\n\x1b[7mReverse\x1b[0m' | uv run python main.py --display
+
+# Display SSH session output
+ssh user@host 2>&1 | uv run python main.py --display
+
+# Programmatic usage
+python -c "
+from terminal.widget import TerminalWidget
+widget = TerminalWidget(rows=24, cols=80, display_only=True)
+widget.feed('\x1b[31mRed text\x1b[0m\n')
+widget.feed('\x1b[47m\x1b[30mBlack on white\x1b[0m\n')
+"
 ```
 
 Keyboard shortcuts:
@@ -49,9 +71,10 @@ Keyboard shortcuts:
 ## Architecture
 
 ```
-main.py → TerminalWidget (QWidget) → PtyTerminal (Rust backend)
-            ├── InputHandler      (QKeyEvent → terminal bytes)
-            └── QPainter           (direct paintEvent rendering)
+Interactive:  main.py → TerminalWidget → PtyTerminal (Rust, PTY)
+Display-only: main.py → TerminalWidget → Terminal (Rust, headless)
+                         ├── InputHandler   (QKeyEvent → terminal bytes)
+                         └── QPainter        (direct paintEvent rendering)
 ```
 
 - **Backend:** [`par-term-emu-core-rust`](https://github.com/paulrobello/par-term-emu-core-rust) — Rust `vte` crate handles PTY, escape parsing, buffer, colors, cursor, scrollback

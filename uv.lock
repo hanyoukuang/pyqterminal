@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12.13"
 
 [[package]]
-name = "kai"
+name = "kai-term"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

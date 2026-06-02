@@ -1,4 +1,4 @@
-from par_term_emu_core_rust import PtyTerminal, CursorStyle, UnderlineStyle
+from par_term_emu_core_rust import PtyTerminal, CursorStyle, UnderlineStyle, Terminal
 from PySide6.QtWidgets import QWidget, QApplication, QMenu
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import (
@@ -34,7 +34,8 @@ class TerminalWidget(QWidget):
     DEFAULT_BG = QColor(0, 0, 0)
     SELECTION_BG = QColor(80, 80, 80)
 
-    def __init__(self, parent=None, rows: int = 24, cols: int = 80):
+    def __init__(self, parent=None, rows: int = 24, cols: int = 80,
+                 display_only: bool = False):
         super().__init__(parent)
 
         self._font = _pick_monospace_font(13)
@@ -50,6 +51,7 @@ class TerminalWidget(QWidget):
         self._cursor_visible = True
         self._blink_visible = True
         self._generation = 0
+        self._display_only = display_only
 
         self._font_bold = QFont(self._font)
         self._font_bold.setBold(True)
@@ -59,7 +61,10 @@ class TerminalWidget(QWidget):
         self._font_bold_italic.setBold(True)
         self._font_bold_italic.setItalic(True)
 
-        self._term = PtyTerminal(self._cols, self._rows)
+        if display_only:
+            self._term = Terminal(self._cols, self._rows)
+        else:
+            self._term = PtyTerminal(self._cols, self._rows)
 
         self._sel_start: tuple[int, int] | None = None
         self._sel_end: tuple[int, int] | None = None
@@ -74,12 +79,31 @@ class TerminalWidget(QWidget):
         self._cursor_timer.timeout.connect(self._toggle_cursor)
         self._cursor_timer.start(530)
 
-        self._poll_timer = QTimer(self)
-        self._poll_timer.timeout.connect(self._poll_updates)
-        self._poll_timer.start(16)
+        self._poll_timer: QTimer | None = None
+        if not display_only:
+            self._poll_timer = QTimer(self)
+            self._poll_timer.timeout.connect(self._poll_updates)
+            self._poll_timer.start(16)
 
     def start_shell(self) -> None:
+        """Start interactive shell (PtyTerminal mode only)."""
+        if self._display_only:
+            raise RuntimeError("start_shell() not available in display-only mode")
         self._term.spawn_shell()
+
+    def feed(self, data: str) -> None:
+        """Feed text/escape sequences for display (display-only mode).
+
+        Use this to pipe terminal output (e.g. from SSH) into the widget
+        for rendering without a local PTY.
+
+        Example:
+            widget.feed("\\x1b[31mHello\\x1b[0m\\n")
+        """
+        if not self._display_only:
+            raise RuntimeError("feed() only available in display-only mode")
+        self._term.process_str(data)
+        self.update()
 
     @property
     def rows(self) -> int:
@@ -92,6 +116,8 @@ class TerminalWidget(QWidget):
     # ── Polling ──────────────────────────────────────────────────────────
 
     def _poll_updates(self) -> None:
+        if self._display_only:
+            return
         if self._term.has_updates_since(self._generation):
             self._generation = self._term.update_generation()
             if self._scroll_offset == 0:
@@ -382,9 +408,10 @@ class TerminalWidget(QWidget):
             self._selecting = True
             self.setCursor(Qt.IBeamCursor)
         elif event.button() == Qt.MiddleButton:
-            text = QApplication.clipboard().text()
-            if text:
-                self._term.write_str(text)
+            if not self._display_only:
+                text = QApplication.clipboard().text()
+                if text:
+                    self._term.write_str(text)
         else:
             super().mousePressEvent(event)
 
@@ -442,6 +469,8 @@ class TerminalWidget(QWidget):
         menu.exec(event.globalPos())
 
     def _paste_clipboard(self) -> None:
+        if self._display_only:
+            return
         text = QApplication.clipboard().text()
         if text:
             self._term.write_str(text)
@@ -511,16 +540,18 @@ class TerminalWidget(QWidget):
             is_paste = paste_key and paste_mod and bool(mods & Qt.ShiftModifier)
         if is_paste:
             self._clear_selection()
-            clipboard = QApplication.clipboard()
-            text = clipboard.text()
-            if text:
-                self._term.write_str(text)
+            if not self._display_only:
+                clipboard = QApplication.clipboard()
+                text = clipboard.text()
+                if text:
+                    self._term.write_str(text)
             return
 
         self._clear_selection()
-        data = InputHandler.encode(event)
-        if data:
-            self._term.write(data)
+        if not self._display_only:
+            data = InputHandler.encode(event)
+            if data:
+                self._term.write(data)
 
     # ── Resize ────────────────────────────────────────────────────────────
 
