@@ -23,7 +23,7 @@ A cross-platform terminal emulator — Python frontend, Rust backend.
 Requires Python 3.12.13+ and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/hanyoukuang/kai.git
+git clone https://github.com/hanyoukuang/kai-term.git
 cd kai
 uv sync
 ```

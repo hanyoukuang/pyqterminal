@@ -1,5 +1,5 @@
 [project]
-name = "kai"
+name = "kai-term"
 version = "0.1.0"
 description = "A cross-platform terminal emulator with Rust backend and PySide6 frontend"
 readme = "README.md"
@@ -26,4 +26,4 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/hanyoukuang/kai"
+Repository = "https://github.com/hanyoukuang/kai-term"
