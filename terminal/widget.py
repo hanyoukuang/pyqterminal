@@ -524,10 +524,6 @@ class TerminalWidget(QWidget):
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         delta = event.angleDelta().y()
-        sb_len = self._term.scrollback_len()
-        if sb_len == 0:
-            return
-
         self._wheel_accum += delta
         threshold = self._cell_h
         lines = self._wheel_accum // threshold
@@ -535,7 +531,8 @@ class TerminalWidget(QWidget):
             return
         self._wheel_accum %= threshold
 
-        self._scroll_offset = max(0, min(sb_len,
+        max_scroll = max(self._term.scrollback_len(), self._rows * 100)
+        self._scroll_offset = max(0, min(max_scroll,
                                   self._scroll_offset - lines))
         self.update()
 
@@ -556,8 +553,8 @@ class TerminalWidget(QWidget):
             self._change_font_size(13 - self._font.pointSize())
             return
         if key == Qt.Key_PageUp and mods & Qt.ShiftModifier:
-            sb_len = self._term.scrollback_len()
-            self._scroll_offset = min(sb_len,
+            max_scroll = max(self._term.scrollback_len(), self._rows * 100)
+            self._scroll_offset = min(max_scroll,
                                       self._scroll_offset + self._rows // 2)
             self.update()
             return
