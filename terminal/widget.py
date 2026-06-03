@@ -149,9 +149,10 @@ class TerminalWidget(QWidget):
             self._draw_row(painter, display_row)
 
         if self._scroll_offset == 0:
-            self._draw_cursor(painter)
             if self._preedit:
                 self._draw_preedit(painter)
+            else:
+                self._draw_cursor(painter)
 
         if self._unseen_output and self._scroll_offset > 0:
             indicator_w = self._cell_w * 3
@@ -367,6 +368,11 @@ class TerminalWidget(QWidget):
         preedit_w = len(self._preedit) * self._cell_w
         ul_y = y + self._cell_h - 2
         painter.drawLine(x, int(ul_y), x + preedit_w, int(ul_y))
+
+        if self._cursor_visible:
+            cx_end = x + preedit_w
+            painter.fillRect(cx_end, y, self._cell_w, self._cell_h,
+                             self.DEFAULT_FG)
 
     # ── Selection ────────────────────────────────────────────────────────
 
