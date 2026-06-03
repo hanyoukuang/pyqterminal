@@ -23,6 +23,7 @@ def _pick_monospace_font(size: int = 13) -> QFont:
     for family in _FONT_CANDIDATES:
         font = QFont(family, size)
         font.setStyleHint(QFont.Monospace)
+        font.setHintingPreference(QFont.PreferFullHinting)
         fm = QFontMetrics(font)
         if fm.horizontalAdvance("M") > 0:
             return font
@@ -40,8 +41,8 @@ class TerminalWidget(QWidget):
 
         self._font = _pick_monospace_font(13)
         self._fm = QFontMetrics(self._font)
-        self._cell_w = max(self._fm.horizontalAdvance("M"), 1)
-        self._cell_h = max(self._fm.height(), 1)
+        self._cell_w = int(max(self._fm.horizontalAdvance("M"), 1))
+        self._cell_h = int(max(self._fm.height(), 1))
 
         self._rows = rows
         self._cols = cols
@@ -138,7 +139,6 @@ class TerminalWidget(QWidget):
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.TextAntialiasing, True)
         painter.setFont(self._font)
         painter.fillRect(self.rect(), self.DEFAULT_BG)
 
@@ -195,20 +195,18 @@ class TerminalWidget(QWidget):
 
     def _render_cells(self, painter: QPainter, cells: list,
                        y: int, display_row: int) -> None:
+        cell_data: list[dict] = []
         for col, (char, fg, bg, attrs) in enumerate(cells):
             if col >= self._cols:
                 break
-
-            # Skip wide_char spacer cells — covered by preceding wide char
             if attrs and attrs.wide_char_spacer:
                 continue
 
             x = col * self._cell_w
-            is_space = not char or char == " "
             is_wide = attrs and attrs.wide_char
             cell_w = self._cell_w * 2 if is_wide else self._cell_w
+            is_space = not char or char == " "
 
-            # Reverse video (SGR 7): swap fg/bg — library does NOT pre-swap
             is_reverse = attrs and attrs.reverse
             if is_reverse:
                 eff_fg = bg if bg else (0, 0, 0)
@@ -220,33 +218,42 @@ class TerminalWidget(QWidget):
             bg_rgb = eff_bg if eff_bg else (0, 0, 0)
             selected = self._cell_in_selection(display_row, col)
 
-            if selected:
-                painter.fillRect(x, y, cell_w, self._cell_h, self.SELECTION_BG)
-            elif bg_rgb != (0, 0, 0):
-                painter.fillRect(x, y, cell_w, self._cell_h, QColor(*bg_rgb))
+            cell_data.append({
+                'x': x, 'cell_w': cell_w, 'char': char,
+                'eff_fg': eff_fg, 'bg_rgb': bg_rgb,
+                'selected': selected, 'attrs': attrs,
+                'is_space': is_space,
+            })
 
-            # Hidden (SGR 8): show background only, no text (e.g. password prompts)
+        for d in cell_data:
+            if d['selected']:
+                painter.fillRect(d['x'], y, d['cell_w'], self._cell_h,
+                                 self.SELECTION_BG)
+            elif d['bg_rgb'] != (0, 0, 0):
+                painter.fillRect(d['x'], y, d['cell_w'], self._cell_h,
+                                 QColor(*d['bg_rgb']))
+
+        for d in cell_data:
+            attrs = d['attrs']
+            char = d['char']
+            x = d['x']
+            cell_w = d['cell_w']
+
             if attrs and attrs.hidden:
                 continue
-
-            if is_space:
+            if d['is_space']:
                 continue
-
-            # Blink (SGR 5): hide text during blink-off phase
             if attrs and attrs.blink and not self._blink_visible:
                 continue
 
-            # --- Text attributes ---
-            is_bold = attrs and attrs.bold
-            is_italic = attrs and attrs.italic
-            is_underline = attrs and attrs.underline
-            fg_rgb = eff_fg if eff_fg else (192, 192, 192)
-
-            # Dim (SGR 2): reduce brightness ~50%
+            fg_rgb = d['eff_fg'] if d['eff_fg'] else (192, 192, 192)
             if attrs and attrs.dim:
                 fg_rgb = tuple(c // 2 for c in fg_rgb)
 
-            # Font selection
+            is_bold = attrs and attrs.bold
+            is_italic = attrs and attrs.italic
+            is_underline = attrs and attrs.underline
+
             if is_bold and is_italic:
                 painter.setFont(self._font_bold_italic)
             elif is_bold:
@@ -256,19 +263,27 @@ class TerminalWidget(QWidget):
             else:
                 painter.setFont(self._font)
 
-            painter.setPen(QColor(*fg_rgb))
-            painter.drawText(x, y + self._fm.ascent(), char)
+            painter.save()
 
-            # Strikethrough (SGR 9)
+            is_block = len(char) == 1 and 0x2580 <= ord(char) <= 0x259F
+            if is_block:
+                painter.setClipRect(x, y, cell_w, self._cell_h)
+            else:
+                painter.setClipRect(x - 2, y - 2, cell_w + 4, self._cell_h + 4)
+
+            painter.setPen(QColor(*fg_rgb))
+            painter.drawText(x, int(y + self._fm.ascent()), char)
+
             if attrs and attrs.strikethrough:
                 mid_y = y + self._cell_h // 2
                 painter.drawLine(x, mid_y, x + cell_w, mid_y)
 
-            # Underline (SGR 4) with style variants
             if is_underline:
                 base_y = y + self._fm.ascent() + 2
                 ul_style = attrs.underline_style
                 self._draw_underline(painter, x, base_y, cell_w, ul_style)
+
+            painter.restore()
 
         painter.setFont(self._font)
 
@@ -430,7 +445,10 @@ class TerminalWidget(QWidget):
         if event.button() == Qt.LeftButton and self._selecting:
             self._selecting = False
             self.setCursor(Qt.ArrowCursor)
-            self._copy_selection()
+            if self._sel_start == self._sel_end:
+                self._clear_selection()
+            else:
+                self._copy_selection()
         else:
             super().mouseReleaseEvent(event)
 
@@ -547,7 +565,6 @@ class TerminalWidget(QWidget):
                     self._term.write_str(text)
             return
 
-        self._clear_selection()
         if not self._display_only:
             data = InputHandler.encode(event)
             if data:
@@ -577,8 +594,8 @@ class TerminalWidget(QWidget):
         size = max(6, min(32, self._font.pointSize() + delta))
         self._font = _pick_monospace_font(size)
         self._fm = QFontMetrics(self._font)
-        self._cell_w = max(self._fm.horizontalAdvance("M"), 1)
-        self._cell_h = max(self._fm.height(), 1)
+        self._cell_w = int(max(self._fm.horizontalAdvance("M"), 1))
+        self._cell_h = int(max(self._fm.height(), 1))
 
         self._font_bold = QFont(self._font)
         self._font_bold.setBold(True)
