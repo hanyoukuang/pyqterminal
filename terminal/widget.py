@@ -523,18 +523,33 @@ class TerminalWidget(QWidget):
             self._term.write_str(text)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        delta = event.angleDelta().y()
-        self._wheel_accum += delta
+        if self._display_only:
+            return
+
+        self._wheel_accum += event.angleDelta().y()
         threshold = self._cell_h
-        lines = self._wheel_accum // threshold
+        lines = int(self._wheel_accum // threshold)
         if lines == 0:
             return
         self._wheel_accum %= threshold
 
-        max_scroll = max(self._term.scrollback_len(), self._rows * 100)
-        self._scroll_offset = max(0, min(max_scroll,
-                                  self._scroll_offset - lines))
-        self.update()
+        if self._term.mouse_mode() != "off":
+            self._send_mouse_wheel(event, lines)
+        else:
+            max_scroll = max(self._term.scrollback_len(), self._rows * 100)
+            self._scroll_offset = max(0, min(max_scroll,
+                                      self._scroll_offset - lines))
+            self.update()
+
+    def _send_mouse_wheel(self, event: QWheelEvent, lines: int) -> None:
+        col = int(event.position().x() // self._cell_w)
+        row = int(event.position().y() // self._cell_h)
+        button = 64 if lines > 0 else 65
+        col = min(col, 222)
+        row = min(row, 222)
+        for _ in range(abs(lines)):
+            seq = b"\x1b[M" + bytes([button + 32]) + bytes([col + 32]) + bytes([row + 32])
+            self._term.write(seq)
 
     # ── Keyboard ─────────────────────────────────────────────────────────
 
