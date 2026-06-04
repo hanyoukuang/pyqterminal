@@ -2,9 +2,16 @@
 
 A cross-platform terminal emulator — Python frontend, Rust backend.
 
+[中文文档](README_zh.md) | [API Reference](API.md)
+
 <p align="center">
   <img src="screenshot.png" alt="pyqterminal Screenshot" width="720">
 </p>
+
+## Documentation
+
+- **[API Reference](API.md)** ([中文](API_zh.md)) — developer guide: embedding TerminalWidget, signals, InputHandler, usage examples
+- **[中文文档](README_zh.md)** — Chinese translation of this README
 
 ## Features
 
@@ -20,7 +27,15 @@ A cross-platform terminal emulator — Python frontend, Rust backend.
 
 ## Installation
 
-Requires Python 3.12.13+ and [`uv`](https://docs.astral.sh/uv/).
+### From PyPI
+
+```bash
+pip install pyqterminal
+```
+
+Requires Python ≥ 3.12.
+
+### From source
 
 ```bash
 git clone https://github.com/hanyoukuang/pyqterminal.git
@@ -33,6 +48,10 @@ uv sync
 ### Interactive mode (default)
 
 ```bash
+# After pip install
+pyqterminal
+
+# Or from source
 uv run python main.py
 ```
 
@@ -42,10 +61,10 @@ Use pyqterminal as a pure terminal display — pipe escape sequences from extern
 
 ```bash
 # Pipe ANSI output to pyqterminal
-echo -e '\x1b[31mHello\x1b[0m\n\x1b[7mReverse\x1b[0m' | uv run python main.py --display
+echo -e '\x1b[31mHello\x1b[0m\n\x1b[7mReverse\x1b[0m' | pyqterminal --display
 
 # Display SSH session output
-ssh user@host 2>&1 | uv run python main.py --display
+ssh user@host 2>&1 | pyqterminal --display
 
 # Programmatic usage
 python -c "
