@@ -232,6 +232,7 @@ class TerminalWidget(QWidget):
 
     def _render_cells(self, painter: QPainter, cells: list,
                        y: int, display_row: int) -> None:
+        abs_row = display_row - self._scroll_offset
         cell_data: list[dict] = []
         for col, (char, fg, bg, attrs) in enumerate(cells):
             if col >= self._cols:
@@ -253,7 +254,7 @@ class TerminalWidget(QWidget):
                 eff_bg = bg
 
             bg_rgb = eff_bg if eff_bg else (0, 0, 0)
-            selected = self._cell_in_selection(display_row, col)
+            selected = self._cell_in_selection(abs_row, col)
 
             cell_data.append({
                 'x': x, 'cell_w': cell_w, 'char': char,
@@ -500,27 +501,26 @@ class TerminalWidget(QWidget):
 
         lines = []
         sb_len = self._term.scrollback_len()
-        for r in range(r1, r2 + 1):
-            live_row = r - self._scroll_offset
-            if live_row < 0:
-                sb_idx = sb_len - self._scroll_offset + r
+        for abs_row in range(r1, r2 + 1):
+            if abs_row < 0:
+                sb_idx = sb_len + abs_row
                 try:
                     cells = self._term.scrollback_line(sb_idx)
                 except Exception:
                     cells = []
             else:
-                if live_row >= self._rows:
+                if abs_row >= self._rows:
                     continue
                 try:
-                    cells = self._term.get_line_cells(live_row)
+                    cells = self._term.get_line_cells(abs_row)
                 except Exception:
                     cells = []
 
             if not cells:
                 continue
 
-            sc = c1 if r == r1 else 0
-            ec = c2 if r == r2 else self._cols - 1
+            sc = c1 if abs_row == r1 else 0
+            ec = c2 if abs_row == r2 else self._cols - 1
 
             line_str = ""
             for col, (char, fg, bg, attrs) in enumerate(cells):
@@ -599,13 +599,14 @@ class TerminalWidget(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         col = int(event.position().x() // self._cell_w)
-        row = int(event.position().y() // self._cell_h)
+        display_row = int(event.position().y() // self._cell_h)
+        abs_row = display_row - self._scroll_offset
         if self._mouse_tracking_active() and not (event.modifiers() & Qt.ShiftModifier):
             self._send_mouse_event(event, True)
         if event.button() == Qt.LeftButton:
             self._clear_selection()
-            self._sel_start = (row, col)
-            self._sel_end = (row, col)
+            self._sel_start = (abs_row, col)
+            self._sel_end = (abs_row, col)
             self._selecting = True
             self.setCursor(Qt.IBeamCursor)
         elif event.button() == Qt.MiddleButton:
@@ -620,9 +621,10 @@ class TerminalWidget(QWidget):
         if self._selecting:
             col = max(0, min(self._cols - 1,
                        int(event.position().x() // self._cell_w)))
-            row = max(0, min(self._rows - 1,
+            display_row = max(0, min(self._rows - 1,
                        int(event.position().y() // self._cell_h)))
-            self._sel_end = (row, col)
+            abs_row = display_row - self._scroll_offset
+            self._sel_end = (abs_row, col)
             self.update()
         elif self._mouse_tracking_active() and event.buttons():
             self._send_mouse_event(event, True, motion=True)
