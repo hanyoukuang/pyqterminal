@@ -87,9 +87,9 @@ class TerminalWidget(QWidget):
         self._font_bold_italic.setItalic(True)
 
         if display_only:
-            self._term = Terminal(self._cols, self._rows)
+            self._term = Terminal(self._cols, self._rows, scrollback=10000)
         else:
-            self._term = PtyTerminal(self._cols, self._rows)
+            self._term = PtyTerminal(self._cols, self._rows, scrollback=10000)
             self._term.set_accept_osc7(True)
 
         self._sel_start: tuple[int, int] | None = None
@@ -155,6 +155,11 @@ class TerminalWidget(QWidget):
             elif not self._unseen_output:
                 self._unseen_output = True
                 self.update()
+
+        try:
+            self._term.drain_responses()
+        except Exception:
+            pass
 
         self._bridge_osc()
 
@@ -487,6 +492,11 @@ class TerminalWidget(QWidget):
     def _draw_cursor(self, painter: QPainter) -> None:
         if not self._cursor_visible:
             return
+        try:
+            if not self._term.cursor_visible():
+                return
+        except Exception:
+            pass
         try:
             cx, cy = self._term.cursor_position()
             style = self._term.cursor_style()
