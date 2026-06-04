@@ -777,6 +777,15 @@ class TerminalWidget(QWidget):
             return
         text = QApplication.clipboard().text()
         if text:
+            self._paste_text(text)
+
+    def _paste_text(self, text: str) -> None:
+        try:
+            if self._term.bracketed_paste():
+                self._term.write_str("\x1b[200~" + text + "\x1b[201~")
+            else:
+                self._term.write_str(text)
+        except Exception:
             self._term.write_str(text)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
@@ -857,10 +866,9 @@ class TerminalWidget(QWidget):
         if is_paste:
             self._clear_selection()
             if not self._display_only:
-                clipboard = QApplication.clipboard()
-                text = clipboard.text()
+                text = QApplication.clipboard().text()
                 if text:
-                    self._term.write_str(text)
+                    self._paste_text(text)
             return
 
         if not self._display_only:
