@@ -24,7 +24,7 @@ def _pick_monospace_font(size: int = 13) -> QFont:
     for family in _FONT_CANDIDATES:
         font = QFont(family, size)
         font.setStyleHint(QFont.Monospace)
-        font.setHintingPreference(QFont.PreferFullHinting)
+        font.setHintingPreference(QFont.PreferVerticalHinting)
         fm = QFontMetrics(font)
         if fm.horizontalAdvance("M") > 0:
             return font
@@ -53,7 +53,7 @@ class TerminalWidget(QWidget):
         if font_family:
             self._font = QFont(font_family, font_size)
             self._font.setStyleHint(QFont.Monospace)
-            self._font.setHintingPreference(QFont.PreferFullHinting)
+            self._font.setHintingPreference(QFont.PreferVerticalHinting)
         else:
             self._font = _pick_monospace_font(font_size)
         self._fm = QFontMetrics(self._font)
