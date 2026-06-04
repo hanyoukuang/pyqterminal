@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.4] — 2026-06-04
+
+### Added
+- Mouse tracking support: when terminal applications enable mouse tracking (CSI ? 1000h), mouse press/move/release events are forwarded to the PTY as X10-encoded escape sequences with Shift/Alt/Ctrl modifier support.
+
 ## [0.1.3] — 2026-06-04
 
 ### Fixed
