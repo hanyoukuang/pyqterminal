@@ -22,7 +22,7 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Rust",
-    "Topic :: Terminals :: Terminal Emulators",
+    "Topic :: Terminals",
 ]
 
 [project.urls]
