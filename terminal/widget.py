@@ -523,7 +523,46 @@ class TerminalWidget(QWidget):
 
     # ── Mouse events ─────────────────────────────────────────────────────
 
+    def _mouse_tracking_active(self) -> bool:
+        """True when the terminal app has requested mouse tracking."""
+        if self._display_only:
+            return False
+        try:
+            return self._term.mouse_mode() != "off"
+        except Exception:
+            return False
+
+    def _send_mouse_event(self, event: QMouseEvent, pressed: bool) -> None:
+        """Forward a mouse event to the PTY when mouse tracking is active."""
+        if self._display_only:
+            return
+        col = min(int(event.position().x() // self._cell_w), 222)
+        row = min(int(event.position().y() // self._cell_h), 222)
+        btn = event.button()
+        if btn == Qt.LeftButton:
+            code = 0
+        elif btn == Qt.MiddleButton:
+            code = 1
+        elif btn == Qt.RightButton:
+            code = 2
+        else:
+            code = 0
+        if not pressed:
+            code = 3  # release
+        modifiers = event.modifiers()
+        if modifiers & Qt.ShiftModifier:
+            code += 4
+        if modifiers & (Qt.AltModifier | Qt.MetaModifier):
+            code += 8
+        if modifiers & Qt.ControlModifier:
+            code += 16
+        seq = b"\x1b[M" + bytes([code + 32]) + bytes([col + 32]) + bytes([row + 32])
+        self._term.write(seq)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self._mouse_tracking_active():
+            self._send_mouse_event(event, True)
+            return
         if event.button() == Qt.LeftButton:
             col = int(event.position().x() // self._cell_w)
             row = int(event.position().y() // self._cell_h)
@@ -541,6 +580,10 @@ class TerminalWidget(QWidget):
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._mouse_tracking_active():
+            if event.buttons():  # only send if a button is held
+                self._send_mouse_event(event, True)
+            return
         if self._selecting:
             col = max(0, min(self._cols - 1,
                        int(event.position().x() // self._cell_w)))
@@ -552,6 +595,9 @@ class TerminalWidget(QWidget):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._mouse_tracking_active():
+            self._send_mouse_event(event, False)
+            return
         if event.button() == Qt.LeftButton and self._selecting:
             self._selecting = False
             self.setCursor(Qt.ArrowCursor)
