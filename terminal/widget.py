@@ -506,23 +506,33 @@ class TerminalWidget(QWidget):
                 sb_idx = sb_len - self._scroll_offset + r
                 try:
                     cells = self._term.scrollback_line(sb_idx)
-                    text = "".join(c[0] for c in cells)
                 except Exception:
-                    text = ""
+                    cells = []
             else:
                 if live_row >= self._rows:
                     continue
                 try:
-                    text = self._term.get_line(live_row)
+                    cells = self._term.get_line_cells(live_row)
                 except Exception:
-                    text = ""
-            if not text:
+                    cells = []
+
+            if not cells:
                 continue
 
             sc = c1 if r == r1 else 0
-            ec = c2 + 1 if r == r2 else len(text)
-            if sc < len(text):
-                lines.append(text[sc:ec])
+            ec = c2 if r == r2 else self._cols - 1
+
+            line_str = ""
+            for col, (char, fg, bg, attrs) in enumerate(cells):
+                if col > ec:
+                    break
+                if col >= sc:
+                    if attrs and attrs.wide_char_spacer:
+                        continue
+                    line_str += char if char else " "
+
+            lines.append(line_str.rstrip())
+
         return "\n".join(lines)
 
     def _copy_selection(self) -> None:
