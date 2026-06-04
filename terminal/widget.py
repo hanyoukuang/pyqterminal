@@ -289,12 +289,16 @@ class TerminalWidget(QWidget):
             painter.save()
 
             is_block = len(char) == 1 and 0x2580 <= ord(char) <= 0x259F
+            is_box = len(char) == 1 and 0x2500 <= ord(char) <= 0x257F
             if is_block and self._draw_block_fill(painter, char, x, y,
                                                    cell_w, self._cell_h, fg_rgb):
                 pass  # drawn as filled rect — seamless, no gaps
             elif is_block:
                 painter.setClipRect(x, y, cell_w, self._cell_h)
                 self._draw_text_path(painter, char, x, y, fg_rgb)
+            elif is_box and self._draw_box_char(painter, char, x, y,
+                                                 cell_w, self._cell_h, fg_rgb):
+                pass  # drawn as filled rects — seamless at cell boundaries
             else:
                 painter.setClipRect(x - 2, y - 2, cell_w + 4, self._cell_h + 4)
                 self._draw_text_path(painter, char, x, y, fg_rgb)
@@ -368,6 +372,126 @@ class TerminalWidget(QWidget):
             painter.fillRect(x + cell_w - fill_w, y, fill_w, cell_h, color)
         else:
             return False  # shade / quadrant — use font
+        return True
+
+    @staticmethod
+    def _draw_box_char(painter: QPainter, char: str, x: int, y: int,
+                        cell_w: int, cell_h: int, fg_rgb: tuple) -> bool:
+        """Draw box drawing character (U+2500–U+257F) as filled rectangles.
+
+        Returns True if drawn, False to fallback to font rendering.
+        Lines extend to cell edges for seamless connections between adjacent cells.
+        """
+        cp = ord(char)
+        color = QColor(*fg_rgb)
+        lw = max(1, cell_w // 8)       # light stroke width (≈1/8 cell)
+        hw = max(1, cell_w // 4)       # heavy stroke width (≈1/4 cell)
+        cx = x + cell_w // 2           # cell center x (int)
+        cy = y + cell_h // 2           # cell center y (int)
+
+        def _vline(x0, w):
+            """Vertical filled rect from top to bottom of cell."""
+            painter.fillRect(x0, y, w, cell_h, color)
+
+        def _hline(y0, h):
+            """Horizontal filled rect from left to right of cell."""
+            painter.fillRect(x, y0, cell_w, h, color)
+
+        def _hline_right(y0, h):
+            """Right half horizontal line."""
+            painter.fillRect(cx, y0, cell_w - cx, h, color)
+
+        def _hline_left(y0, h):
+            """Left half horizontal line."""
+            painter.fillRect(x, y0, cx, h, color)
+
+        def _vline_bottom(x0, w):
+            """Bottom half vertical line."""
+            painter.fillRect(x0, cy, w, cell_h - cy, color)
+
+        def _vline_top(x0, w):
+            """Top half vertical line."""
+            painter.fillRect(x0, y, w, cy, color)
+
+        # ── Light single ──
+        if cp == 0x2500:   # ─ HORIZONTAL
+            _hline(cy - lw // 2, lw)
+        elif cp == 0x2502: # │ VERTICAL
+            _vline(cx - lw // 2, lw)
+        elif cp == 0x250C: # ┌ DOWN AND RIGHT
+            _vline_bottom(cx - lw // 2, lw); _hline_right(cy - lw // 2, lw)
+        elif cp == 0x2510: # ┐ DOWN AND LEFT
+            _vline_bottom(cx - lw // 2, lw); _hline_left(cy - lw // 2, lw)
+        elif cp == 0x2514: # └ UP AND RIGHT
+            _vline_top(cx - lw // 2, lw); _hline_right(cy - lw // 2, lw)
+        elif cp == 0x2518: # ┘ UP AND LEFT
+            _vline_top(cx - lw // 2, lw); _hline_left(cy - lw // 2, lw)
+        elif cp == 0x251C: # ├ VERTICAL AND RIGHT
+            _vline(cx - lw // 2, lw); _hline_right(cy - lw // 2, lw)
+        elif cp == 0x2524: # ┤ VERTICAL AND LEFT
+            _vline(cx - lw // 2, lw); _hline_left(cy - lw // 2, lw)
+        elif cp == 0x252C: # ┬ DOWN AND HORIZONTAL
+            _hline(cy - lw // 2, lw); _vline_bottom(cx - lw // 2, lw)
+        elif cp == 0x2534: # ┴ UP AND HORIZONTAL
+            _hline(cy - lw // 2, lw); _vline_top(cx - lw // 2, lw)
+        elif cp == 0x253C: # ┼ VERTICAL AND HORIZONTAL
+            _hline(cy - lw // 2, lw); _vline(cx - lw // 2, lw)
+
+        # ── Heavy single ──
+        elif cp == 0x2501: # ━ HEAVY HORIZONTAL
+            _hline(cy - hw // 2, hw)
+        elif cp == 0x2503: # ┃ HEAVY VERTICAL
+            _vline(cx - hw // 2, hw)
+
+        # ── Double lines (two light strokes with light gap) ──
+        elif cp == 0x2550: # ═ DOUBLE HORIZONTAL
+            _hline(y + lw, lw); _hline(y + cell_h - lw * 2, lw)
+        elif cp == 0x2551: # ║ DOUBLE VERTICAL
+            _vline(x + lw, lw); _vline(x + cell_w - lw * 2, lw)
+        elif cp == 0x2554: # ╔ DOUBLE DOWN AND RIGHT
+            _vline_bottom(x + lw, lw)
+            _vline_bottom(x + cell_w - lw * 2, lw)
+            _hline_right(y + lw, lw)
+            _hline_right(y + cell_h - lw * 2, lw)
+        elif cp == 0x2557: # ╗ DOUBLE DOWN AND LEFT
+            _vline_bottom(x + lw, lw)
+            _vline_bottom(x + cell_w - lw * 2, lw)
+            _hline_left(y + lw, lw)
+            _hline_left(y + cell_h - lw * 2, lw)
+        elif cp == 0x255A: # ╚ DOUBLE UP AND RIGHT
+            _vline_top(x + lw, lw)
+            _vline_top(x + cell_w - lw * 2, lw)
+            _hline_right(y + lw, lw)
+            _hline_right(y + cell_h - lw * 2, lw)
+        elif cp == 0x255D: # ╝ DOUBLE UP AND LEFT
+            _vline_top(x + lw, lw)
+            _vline_top(x + cell_w - lw * 2, lw)
+            _hline_left(y + lw, lw)
+            _hline_left(y + cell_h - lw * 2, lw)
+        elif cp == 0x2560: # ╠ DOUBLE VERTICAL AND RIGHT
+            _vline(x + lw, lw)
+            _vline(x + cell_w - lw * 2, lw)
+            _hline_right(cy - lw // 2, lw)
+        elif cp == 0x2563: # ╣ DOUBLE VERTICAL AND LEFT
+            _vline(x + lw, lw)
+            _vline(x + cell_w - lw * 2, lw)
+            _hline_left(cy - lw // 2, lw)
+        elif cp == 0x2566: # ╦ DOUBLE DOWN AND HORIZONTAL
+            _hline(y + lw, lw)
+            _hline(y + cell_h - lw * 2, lw)
+            _vline_bottom(cx - lw // 2, lw)
+        elif cp == 0x2569: # ╩ DOUBLE UP AND HORIZONTAL
+            _hline(y + lw, lw)
+            _hline(y + cell_h - lw * 2, lw)
+            _vline_top(cx - lw // 2, lw)
+        elif cp == 0x256C: # ╬ DOUBLE VERTICAL AND HORIZONTAL
+            _hline(y + lw, lw)
+            _hline(y + cell_h - lw * 2, lw)
+            _vline(x + lw, lw)
+            _vline(x + cell_w - lw * 2, lw)
+
+        else:
+            return False  # arcs, diagonals, half-lines — use font
         return True
 
     @staticmethod
