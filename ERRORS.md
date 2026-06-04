@@ -15,7 +15,7 @@
 | 5 | 06-03 | Phase 5 | 内容只占窗口 1/4，仅左上角显示 | QPixmap 双缓冲在 Retina 屏上的 devicePixelRatio 行为异常，导致渲染区域为实际窗口的 1/2 宽 × 1/2 高 = 1/4 | 移除 QPixmap，直接 render 到 Widget 的 QPainter（paintEvent 中），Qt 自动处理 DPR |
 | 6 | 06-03 | Phase 5 | 彩色背景的"空格"单元格不显示背景色 | `_draw_row` 中背景填充在空格跳过逻辑之后 | 将 bg fillRect 移到空格判断之前 |
 | 7 | 06-03 | Phase 5 | nano 上方标题栏/下方提示栏纯白色背景不显示 | `attrs.reverse` (SGR 7) 未被渲染层处理。Rust 引擎不预交换 fg/bg，需要渲染层自己交换 | 在 `_render_cells` 中添加 `attrs.reverse` 检测，为 True 时交换 fg/bg（含默认值处理） |
-| 8 | 06-04 | Phase 6 | 鼠标拖拽选择文字后：(1) 高亮不消失 (2) 无复制横幅/通知 | `_copy_selection()` 只写系统剪贴板，之后未调用 `_clear_selection()`；无任何通知机制（无 Signal、无 toast、无 IPC） | 见下方详细分析 |
+| 8 | 06-04 | Phase 6 | ~~高亮不消失~~（非 Bug，见下方） + 无复制通知 + SGR 鼠标编码 Bug | `_send_mouse_event` 中 `mouse_encoding().name` 永远失败，SGR 编码从未启用 | 修复 SGR 编码检测 + 记录高亮行为规范 |
 
 ---
 
@@ -60,42 +60,32 @@
 
 ---
 
-## 错误 #8 详细分析：选择高亮不消失 + 无复制横幅
+## 错误 #8：选择高亮行为规范 + SGR 鼠标编码 Bug
 
-### 问题描述
+### 高亮不消失：标准行为，非 Bug
 
-鼠标拖拽选择文字（A→B），释放后：文字被复制到系统剪贴板 ✅，但：
-1. 选择高亮（灰色背景）不消失
-2. 没有任何视觉通知（横幅/toast/弹窗）
+> 现代终端模拟器（xterm.js、iTerm2、Alacritty、Windows Terminal）在鼠标拖拽释放后**不会主动清除高亮**。
+> 高亮保留作为视觉参考。仅在以下情况清除：
+> - 用户下次点击（`mousePressEvent` → `_clear_selection()`）
+> - 键盘输入（`keyPressEvent` → `_clear_selection()`）
+> - 宿主应用主动调用 `clear_selection()`
+>
+> **禁止在 `mouseReleaseEvent` 中调用 `_clear_selection()`。**
 
-### 根因
+### SGR 鼠标编码 Bug
 
-`_copy_selection()`（widget.py 行 527-530）只做了：
-
+`_send_mouse_event` 第 670 行：
 ```python
-def _copy_selection(self) -> None:
-    text = self._selected_text()
-    if text:
-        QApplication.clipboard().setText(text)  # ← 仅此而已
+enc = self._term.mouse_encoding().name  # BUG: MouseEncoding 没有 .name
+```
+`MouseEncoding` 是 Rust enum，无 `.name` 属性，永远抛 `AttributeError`，SGR 编码从未启用。
+
+修复：
+```python
+from par_term_emu_core_rust import MouseEncoding
+is_sgr = self._term.mouse_encoding() == MouseEncoding.Sgr
 ```
 
-缺少三项关键操作：
-1. **未调用 `_clear_selection()`** — 高亮不消失
-2. **无信号** — 同进程宿主应用无法感知复制事件
-3. **无跨进程通知** — 独立进程宿主应用无法感知
+### 缺少通知机制
 
-### 已探索但回滚的修复方案
-
-| 方案 | 问题 |
-|------|------|
-| 纯 Qt Signal (`selection_copied`) | 跨进程无效 |
-| Rust Terminal API 替换 Python 选择 | PtyTerminal 无选择 API |
-| 临时文件 IPC (`/tmp/pyqterminal_copy`) | 单向通信，无法让宿主回调清除 |
-| 终端内 PySide6 toast 横幅 | 与宿主应用横幅冲突 |
-
-### 待解决问题
-
-- [ ] OpenCode 与 pyqterminal 的嵌入方式未确认（同进程 vs 独立进程）
-- [ ] 同进程：需 `selection_copied` Signal + `clear_selection()` 公开方法
-- [ ] 跨进程：需自定义 DCS escape 序列或双向 IPC 通道
-- [ ] 终端内 toast 与宿主应用横幅的冲突/重复问题
+`_copy_selection()` 无信号、无 IPC。`selection_copied` Signal 仅同进程有效。跨进程需文件或 OSC 52 桥接。

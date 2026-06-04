@@ -681,7 +681,6 @@ class TerminalWidget(QWidget):
         row = int(event.position().y() // self._cell_h)
         if self._mouse_tracking_active() and not (event.modifiers() & Qt.ShiftModifier):
             self._send_mouse_event(event, True)
-            return
 
         if event.button() == Qt.LeftButton and (event.modifiers() & Qt.ControlModifier):
             link = self._hyperlink_at(col, row)
