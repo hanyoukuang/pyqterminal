@@ -73,6 +73,7 @@ class TerminalWidget(QWidget):
         self._blink_visible = True
         self._generation = 0
         self._display_only = display_only
+        self._shell_started = False
         self._prev_title = ""
         self._prev_clipboard = ""
         self._prev_cwd = ""
@@ -124,6 +125,7 @@ class TerminalWidget(QWidget):
         if self._display_only:
             raise RuntimeError("start_shell() not available in display-only mode")
         self._term.spawn_shell()
+        self._shell_started = True
         if sys.platform == "win32":
             self._ensure_start_menu_shortcut()
 
@@ -722,7 +724,7 @@ class TerminalWidget(QWidget):
 
     def _send_mouse_event(self, event: QMouseEvent, pressed: bool,
                             motion: bool = False) -> None:
-        if self._display_only:
+        if self._display_only or not self._shell_started:
             return
         col = int(event.position().x() // self._cell_w)
         row = int(event.position().y() // self._cell_h)
