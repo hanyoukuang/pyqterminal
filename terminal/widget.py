@@ -417,13 +417,13 @@ class TerminalWidget(QWidget):
 
             is_reverse = attrs and attrs.reverse
             if is_reverse:
-                eff_fg = bg if bg is not None else (0, 0, 0)
-                eff_bg = fg if fg is not None else (192, 192, 192)
+                eff_fg = bg if bg else (0, 0, 0)
+                eff_bg = fg if fg else (192, 192, 192)
             else:
                 eff_fg = fg
                 eff_bg = bg
 
-            bg_rgb = eff_bg if eff_bg is not None else (0, 0, 0)
+            bg_rgb = eff_bg if eff_bg else (0, 0, 0)
             selected = self._cell_in_selection(display_row, col)
 
             hyperlink = ""
@@ -492,7 +492,7 @@ class TerminalWidget(QWidget):
             if attrs and attrs.blink and not self._blink_visible:
                 continue
 
-            fg_rgb = d['eff_fg'] if d['eff_fg'] is not None else (192, 192, 192)
+            fg_rgb = d['eff_fg'] if d['eff_fg'] else (192, 192, 192)
             if attrs and attrs.dim:
                 fg_rgb = tuple(c // 2 for c in fg_rgb)
 
