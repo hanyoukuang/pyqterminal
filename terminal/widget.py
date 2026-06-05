@@ -392,6 +392,11 @@ class TerminalWidget(QWidget):
 
         last_bg = None
         for d in cell_data:
+            if d['bg_rgb'] != (0, 0, 0) or not d['is_space']:
+                last_bg = d['bg_rgb']
+                break
+
+        for d in cell_data:
             if d['bg_rgb'] != (0, 0, 0):
                 last_bg = d['bg_rgb']
             elif last_bg is not None and d['is_space']:
