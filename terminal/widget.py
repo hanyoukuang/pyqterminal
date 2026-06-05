@@ -175,6 +175,20 @@ class TerminalWidget(QWidget):
     def cols(self) -> int:
         return self._cols
 
+    def _pty_write(self, data) -> None:
+        try:
+            self._term.write(data)
+        except RuntimeError:
+            self._shell_started = False
+            self.process_exited.emit(-1)
+
+    def _pty_write_str(self, text: str) -> None:
+        try:
+            self._term.write_str(text)
+        except RuntimeError:
+            self._shell_started = False
+            self.process_exited.emit(-1)
+
     # ── Polling ──────────────────────────────────────────────────────────
 
     def _poll_updates(self) -> None:
@@ -191,6 +205,10 @@ class TerminalWidget(QWidget):
 
         try:
             self._term.drain_responses()
+        except RuntimeError:
+            if self._shell_started:
+                self._shell_started = False
+                self.process_exited.emit(-1)
         except Exception:
             pass
 
@@ -755,18 +773,18 @@ class TerminalWidget(QWidget):
         if not motion:
             seq = self._mouse_term.simulate_mouse_event(code & 3, col, row, pressed)
             if seq:
-                self._term.write(seq)
+                self._pty_write(seq)
         elif is_sgr:
             if pressed:
                 code += 32
             seq = f"\x1b[<{code};{col + 1};{row + 1}{'M' if pressed else 'm'}".encode()
-            self._term.write(seq)
+            self._pty_write(seq)
         else:
             col = min(col, 222)
             row = min(row, 222)
             code += 32
             seq = b"\x1b[M" + bytes([code + 32]) + bytes([col + 32]) + bytes([row + 32])
-            self._term.write(seq)
+            self._pty_write(seq)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         col = int(event.position().x() // self._cell_w)
@@ -797,7 +815,7 @@ class TerminalWidget(QWidget):
             if not self._display_only:
                 text = QApplication.clipboard().text()
                 if text:
-                    self._term.write_str(text)
+                    self._pty_write_str(text)
         else:
             super().mousePressEvent(event)
 
@@ -889,11 +907,11 @@ class TerminalWidget(QWidget):
     def _paste_text(self, text: str) -> None:
         try:
             if self._term.bracketed_paste():
-                self._term.write_str("\x1b[200~" + text + "\x1b[201~")
+                self._pty_write_str("\x1b[200~" + text + "\x1b[201~")
             else:
-                self._term.write_str(text)
+                self._pty_write_str(text)
         except Exception:
-            self._term.write_str(text)
+            self._pty_write_str(text)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self._display_only:
@@ -922,7 +940,7 @@ class TerminalWidget(QWidget):
         row = min(row, 222)
         for _ in range(abs(lines)):
             seq = b"\x1b[M" + bytes([button + 32]) + bytes([col + 32]) + bytes([row + 32])
-            self._term.write(seq)
+            self._pty_write(seq)
 
     # ── Keyboard ─────────────────────────────────────────────────────────
 
@@ -981,12 +999,12 @@ class TerminalWidget(QWidget):
         if not self._display_only and self._shell_started:
             data = InputHandler.encode(event)
             if data:
-                self._term.write(data)
+                self._pty_write(data)
 
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:
         commit = event.commitString()
         if commit:
-            self._term.write_str(commit)
+            self._pty_write_str(commit)
         self._preedit = event.preeditString()
         self.update()
 
