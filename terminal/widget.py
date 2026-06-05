@@ -8,11 +8,7 @@ from PySide6.QtGui import (
     QInputMethodEvent, QPainterPath,
 )
 import sys
-import logging
-
 from .input_handler import InputHandler
-
-_log = logging.getLogger(__name__)
 
 
 _FONT_CANDIDATES = (
@@ -77,8 +73,6 @@ class TerminalWidget(QWidget):
         self._blink_visible = True
         self._generation = 0
         self._display_only = display_only
-        self._shell_started = False
-        self._active_bg = None
         self._prev_title = ""
         self._prev_clipboard = ""
         self._prev_cwd = ""
@@ -129,42 +123,7 @@ class TerminalWidget(QWidget):
         """Start interactive shell (PtyTerminal mode only)."""
         if self._display_only:
             raise RuntimeError("start_shell() not available in display-only mode")
-        try:
-            self._term.spawn_shell()
-        except RuntimeError:
-            _log.warning("spawn_shell failed — PTY may be dead, creating fresh terminal")
-            self._term = PtyTerminal(self._cols, self._rows, scrollback=10000)
-            self._term.set_accept_osc7(True)
-            self._term.spawn_shell()
-        self._shell_started = True
-        self._restart_scheduled = False
-        self._active_bg = None
-        _log.info("PTY session started")
-        if sys.platform == "win32":
-            self._ensure_start_menu_shortcut()
-
-    @staticmethod
-    def _ensure_start_menu_shortcut() -> None:
-        try:
-            import os, subprocess
-            appdata = os.environ["APPDATA"]
-            shortcut_dir = os.path.join(
-                appdata, r"Microsoft\Windows\Start Menu\Programs\pyqterminal")
-            shortcut_path = os.path.join(shortcut_dir, "pyqterminal.lnk")
-            if os.path.exists(shortcut_path):
-                return
-            os.makedirs(shortcut_dir, exist_ok=True)
-            subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 f"$ws=New-Object -ComObject WScript.Shell;"
-                 f"$s=$ws.CreateShortcut('{shortcut_path}');"
-                 f"$s.TargetPath='{sys.executable}';"
-                 f"$s.Arguments='-m terminal';"
-                 f"$s.WorkingDirectory='{os.path.dirname(sys.executable)}';"
-                 f"$s.Save()"],
-                capture_output=True, timeout=5)
-        except Exception:
-            pass
+        self._term.spawn_shell()
 
     def feed(self, data: str) -> None:
         """Feed text/escape sequences for display (display-only mode).
@@ -189,36 +148,6 @@ class TerminalWidget(QWidget):
     def cols(self) -> int:
         return self._cols
 
-    def _pty_write(self, data) -> None:
-        try:
-            self._term.write(data)
-        except RuntimeError:
-            _log.info("PTY write failed — session appears to have exited")
-            self._shell_started = False
-            self.process_exited.emit(-1)
-            self._schedule_restart()
-
-    def _pty_write_str(self, text: str) -> None:
-        try:
-            self._term.write_str(text)
-        except RuntimeError:
-            _log.info("PTY write_str failed — session appears to have exited")
-            self._shell_started = False
-            self.process_exited.emit(-1)
-            self._schedule_restart()
-
-    def _schedule_restart(self) -> None:
-        if not getattr(self, '_restart_scheduled', False):
-            self._restart_scheduled = True
-            QTimer.singleShot(300, self._restart_shell)
-
-    def _restart_shell(self) -> None:
-        self._restart_scheduled = False
-        if self._shell_started:
-            return
-        _log.info("restarting PTY session")
-        self.start_shell()
-
     # ── Polling ──────────────────────────────────────────────────────────
 
     def _poll_updates(self) -> None:
@@ -235,12 +164,6 @@ class TerminalWidget(QWidget):
 
         try:
             self._term.drain_responses()
-        except RuntimeError:
-            if self._shell_started:
-                _log.info("drain_responses failed — PTY session exited")
-                self._shell_started = False
-                self.process_exited.emit(-1)
-                self._schedule_restart()
         except Exception:
             pass
 
@@ -306,23 +229,6 @@ class TerminalWidget(QWidget):
                     ["osascript", "-e",
                      f'display notification "{message}" with title "{title or "Terminal"}"'],
                     capture_output=True, timeout=3)
-            elif sys.platform == "win32":
-                safe_title = (title or "Terminal").replace("'", "''")
-                safe_msg = message.replace("'", "''")
-                ps = (
-                    "[Windows.UI.Notifications.ToastNotificationManager,"
-                    "Windows.UI.Notifications,ContentType=WindowsRuntime];"
-                    "$tpl=[Windows.UI.Notifications.ToastNotificationManager]"
-                    "::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
-                    f"$tpl.GetElementsByTagName('text').Item(0).AppendChild($tpl.CreateTextNode('{safe_title}'));"
-                    f"$tpl.GetElementsByTagName('text').Item(1).AppendChild($tpl.CreateTextNode('{safe_msg}'));"
-                    "$n=[Windows.UI.Notifications.ToastNotification]::new($tpl);"
-                    "[Windows.UI.Notifications.ToastNotificationManager]"
-                    "::CreateToastNotifier('pyqterminal').Show($n)"
-                )
-                subprocess.run(
-                    ["powershell", "-NoProfile", "-Command", ps],
-                    capture_output=True, timeout=5)
             elif sys.platform == "linux":
                 subprocess.run(
                     ["notify-send", title or "Terminal", message],
@@ -413,7 +319,7 @@ class TerminalWidget(QWidget):
             x = col * self._cell_w
             is_wide = attrs and attrs.wide_char
             cell_w = self._cell_w * 2 if is_wide else self._cell_w
-            is_space = not char or char.isspace() or char == "\x00"
+            is_space = not char or char == " "
 
             is_reverse = attrs and attrs.reverse
             if is_reverse:
@@ -440,42 +346,11 @@ class TerminalWidget(QWidget):
                 'is_space': is_space, 'hyperlink': hyperlink,
             })
 
-        last_bg = None
-        for d in cell_data:
-            if d['bg_rgb'] != (0, 0, 0):
-                last_bg = d['bg_rgb']
-                break
-
-        if last_bg is None and self._active_bg is not None:
-            last_bg = self._active_bg
-        elif last_bg is None and buffer_row >= 0:
-            for next_row in range(buffer_row + 1, min(buffer_row + 8, self._rows)):
-                try:
-                    for _, _, bg, _ in self._term.get_line_cells(next_row):
-                        if bg != (0, 0, 0):
-                            last_bg = bg
-                            break
-                except Exception:
-                    continue
-                if last_bg is not None:
-                    break
-
-        for d in cell_data:
-            if d['bg_rgb'] != (0, 0, 0):
-                last_bg = d['bg_rgb']
-            elif last_bg is not None and d['is_space']:
-                d['bg_rgb'] = last_bg
-            if not d['is_space']:
-                last_bg = d['bg_rgb']
-
-        if last_bg is not None and last_bg != (0, 0, 0):
-            self._active_bg = last_bg
-
         for d in cell_data:
             if d['selected']:
                 painter.fillRect(d['x'], y, d['cell_w'], self._cell_h,
                                  self.SELECTION_BG)
-            else:
+            elif d['bg_rgb'] != (0, 0, 0):
                 painter.fillRect(d['x'], y, d['cell_w'], self._cell_h,
                                  QColor(*d['bg_rgb']))
 
@@ -793,10 +668,10 @@ class TerminalWidget(QWidget):
 
     def _send_mouse_event(self, event: QMouseEvent, pressed: bool,
                             motion: bool = False) -> None:
-        if self._display_only or not self._shell_started:
+        if self._display_only:
             return
-        col = max(0, min(self._cols - 1, int(event.position().x() // self._cell_w)))
-        row = max(0, min(self._rows - 1, int(event.position().y() // self._cell_h)))
+        col = int(event.position().x() // self._cell_w)
+        row = int(event.position().y() // self._cell_h)
         btn = event.button()
         if btn == Qt.LeftButton:
             code = 0
@@ -819,18 +694,18 @@ class TerminalWidget(QWidget):
         if not motion:
             seq = self._mouse_term.simulate_mouse_event(code & 3, col, row, pressed)
             if seq:
-                self._pty_write(seq)
+                self._term.write(seq)
         elif is_sgr:
             if pressed:
                 code += 32
             seq = f"\x1b[<{code};{col + 1};{row + 1}{'M' if pressed else 'm'}".encode()
-            self._pty_write(seq)
+            self._term.write(seq)
         else:
             col = min(col, 222)
             row = min(row, 222)
             code += 32
             seq = b"\x1b[M" + bytes([code + 32]) + bytes([col + 32]) + bytes([row + 32])
-            self._pty_write(seq)
+            self._term.write(seq)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         col = int(event.position().x() // self._cell_w)
@@ -861,7 +736,7 @@ class TerminalWidget(QWidget):
             if not self._display_only:
                 text = QApplication.clipboard().text()
                 if text:
-                    self._pty_write_str(text)
+                    self._term.write_str(text)
         else:
             super().mousePressEvent(event)
 
@@ -953,11 +828,11 @@ class TerminalWidget(QWidget):
     def _paste_text(self, text: str) -> None:
         try:
             if self._term.bracketed_paste():
-                self._pty_write_str("\x1b[200~" + text + "\x1b[201~")
+                self._term.write_str("\x1b[200~" + text + "\x1b[201~")
             else:
-                self._pty_write_str(text)
+                self._term.write_str(text)
         except Exception:
-            self._pty_write_str(text)
+            self._term.write_str(text)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self._display_only:
@@ -986,7 +861,7 @@ class TerminalWidget(QWidget):
         row = min(row, 222)
         for _ in range(abs(lines)):
             seq = b"\x1b[M" + bytes([button + 32]) + bytes([col + 32]) + bytes([row + 32])
-            self._pty_write(seq)
+            self._term.write(seq)
 
     # ── Keyboard ─────────────────────────────────────────────────────────
 
@@ -1042,15 +917,15 @@ class TerminalWidget(QWidget):
                     self._paste_text(text)
             return
 
-        if not self._display_only and self._shell_started:
+        if not self._display_only:
             data = InputHandler.encode(event)
             if data:
-                self._pty_write(data)
+                self._term.write(data)
 
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:
         commit = event.commitString()
         if commit:
-            self._pty_write_str(commit)
+            self._term.write_str(commit)
         self._preedit = event.preeditString()
         self.update()
 
@@ -1074,10 +949,7 @@ class TerminalWidget(QWidget):
         if new_cols != self._cols or new_rows != self._rows:
             self._cols = new_cols
             self._rows = new_rows
-            try:
-                self._term.resize(self._cols, self._rows)
-            except RuntimeError:
-                _log.warning("PTY resize failed in resizeEvent (cols=%s rows=%s)", self._cols, self._rows)
+            self._term.resize(self._cols, self._rows)
             self._mouse_term.resize(self._cols, self._rows)
 
         self.update()
@@ -1108,10 +980,5 @@ class TerminalWidget(QWidget):
         new_rows = max(1, self.height() // self._cell_h)
         self._cols = new_cols
         self._rows = new_rows
-        try:
-            self._term.resize(self._cols, self._rows)
-        except RuntimeError:
-            _log.warning("PTY resize failed in _change_font_size (cols=%s rows=%s)", self._cols, self._rows)
-        self._mouse_term.resize(self._cols, self._rows)
-
+        self._term.resize(self._cols, self._rows)
         self.update()
