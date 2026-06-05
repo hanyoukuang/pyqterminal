@@ -448,6 +448,17 @@ class TerminalWidget(QWidget):
 
         if last_bg is None and self._active_bg is not None:
             last_bg = self._active_bg
+        elif last_bg is None and buffer_row >= 0:
+            for next_row in range(buffer_row + 1, min(buffer_row + 8, self._rows)):
+                try:
+                    for _, _, bg, _ in self._term.get_line_cells(next_row):
+                        if bg != (0, 0, 0):
+                            last_bg = bg
+                            break
+                except Exception:
+                    continue
+                if last_bg is not None:
+                    break
 
         for d in cell_data:
             if d['bg_rgb'] != (0, 0, 0):
