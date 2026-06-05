@@ -978,7 +978,7 @@ class TerminalWidget(QWidget):
                     self._paste_text(text)
             return
 
-        if not self._display_only:
+        if not self._display_only and self._shell_started:
             data = InputHandler.encode(event)
             if data:
                 self._term.write(data)
@@ -1010,7 +1010,10 @@ class TerminalWidget(QWidget):
         if new_cols != self._cols or new_rows != self._rows:
             self._cols = new_cols
             self._rows = new_rows
-            self._term.resize(self._cols, self._rows)
+            try:
+                self._term.resize(self._cols, self._rows)
+            except RuntimeError:
+                pass
             self._mouse_term.resize(self._cols, self._rows)
 
         self.update()
@@ -1041,5 +1044,8 @@ class TerminalWidget(QWidget):
         new_rows = max(1, self.height() // self._cell_h)
         self._cols = new_cols
         self._rows = new_rows
-        self._term.resize(self._cols, self._rows)
+        try:
+            self._term.resize(self._cols, self._rows)
+        except RuntimeError:
+            pass
         self.update()
