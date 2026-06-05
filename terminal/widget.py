@@ -367,22 +367,18 @@ class TerminalWidget(QWidget):
                 if last_bg is not None:
                     break
 
-        for d in cell_data:
-            if d['bg_rgb'] != (0, 0, 0):
-                last_bg = d['bg_rgb']
-            elif last_bg is not None and d['is_space']:
-                d['bg_rgb'] = last_bg
-            if not d['is_space']:
-                last_bg = d['bg_rgb']
-
         if last_bg is not None and last_bg != (0, 0, 0):
             self._active_bg = last_bg
+
+        if last_bg is not None:
+            painter.fillRect(0, y, self._cols * self._cell_w, self._cell_h,
+                             QColor(*last_bg))
 
         for d in cell_data:
             if d['selected']:
                 painter.fillRect(d['x'], y, d['cell_w'], self._cell_h,
                                  self.SELECTION_BG)
-            else:
+            elif last_bg is None or d['bg_rgb'] != last_bg:
                 painter.fillRect(d['x'], y, d['cell_w'], self._cell_h,
                                  QColor(*d['bg_rgb']))
 
