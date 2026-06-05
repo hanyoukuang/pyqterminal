@@ -447,7 +447,6 @@ class TerminalWidget(QWidget):
                 break
 
         if last_bg is None and self._active_bg is not None:
-            _log.debug("row %d: inheriting _active_bg=%s", buffer_row, self._active_bg)
             last_bg = self._active_bg
         elif last_bg is None and buffer_row >= 0:
             for next_row in range(buffer_row + 1, min(buffer_row + 8, self._rows)):
@@ -455,15 +454,11 @@ class TerminalWidget(QWidget):
                     for _, _, bg, _ in self._term.get_line_cells(next_row):
                         if bg != (0, 0, 0):
                             last_bg = bg
-                            _log.debug("row %d: forward-scan found bg=%s at row %d", buffer_row, bg, next_row)
                             break
                 except Exception:
                     continue
                 if last_bg is not None:
                     break
-
-        if last_bg is None:
-            _log.debug("row %d: no effective bg found (_active_bg=%s)", buffer_row, self._active_bg)
 
         for d in cell_data:
             if d['bg_rgb'] != (0, 0, 0):
@@ -473,7 +468,7 @@ class TerminalWidget(QWidget):
             if not d['is_space']:
                 last_bg = d['bg_rgb']
 
-        if last_bg is not None:
+        if last_bg is not None and last_bg != (0, 0, 0):
             self._active_bg = last_bg
 
         painter.save()
