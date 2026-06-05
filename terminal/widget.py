@@ -8,7 +8,11 @@ from PySide6.QtGui import (
     QInputMethodEvent, QPainterPath,
 )
 import sys
+import logging
+
 from .input_handler import InputHandler
+
+_log = logging.getLogger(__name__)
 
 
 _FONT_CANDIDATES = (
@@ -124,7 +128,11 @@ class TerminalWidget(QWidget):
         """Start interactive shell (PtyTerminal mode only)."""
         if self._display_only:
             raise RuntimeError("start_shell() not available in display-only mode")
-        self._term.spawn_shell()
+        try:
+            self._term.spawn_shell()
+            _log.info("PTY session started")
+        except Exception:
+            _log.exception("spawn_shell failed")
 
     def feed(self, data: str) -> None:
         """Feed text/escape sequences for display (display-only mode).
@@ -152,25 +160,27 @@ class TerminalWidget(QWidget):
     # ── Polling ──────────────────────────────────────────────────────────
 
     def _poll_updates(self) -> None:
-        if self._display_only:
-            return
-        if self._term.has_updates_since(self._generation):
-            self._generation = self._term.update_generation()
-            if self._scroll_offset == 0:
-                self._unseen_output = False
-                self.update()
-            elif not self._unseen_output:
-                self._unseen_output = True
-                self.update()
-
         try:
-            self._term.drain_responses()
+            if self._display_only:
+                return
+            if self._term.has_updates_since(self._generation):
+                self._generation = self._term.update_generation()
+                if self._scroll_offset == 0:
+                    self._unseen_output = False
+                    self.update()
+                elif not self._unseen_output:
+                    self._unseen_output = True
+                    self.update()
+
+            try:
+                self._term.drain_responses()
+            except Exception:
+                pass
+
+            self._sync_mouse_term()
+            self._bridge_osc()
         except Exception:
-            pass
-
-        self._sync_mouse_term()
-
-        self._bridge_osc()
+            _log.exception("_poll_updates failed")
 
     def _bridge_osc(self) -> None:
         try:
@@ -250,28 +260,31 @@ class TerminalWidget(QWidget):
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
-        painter.setFont(self._font)
-        painter.fillRect(self.rect(), self.DEFAULT_BG)
+        try:
+            painter.setFont(self._font)
+            painter.fillRect(self.rect(), self.DEFAULT_BG)
 
-        for display_row in range(self._rows):
-            self._draw_row(painter, display_row)
+            for display_row in range(self._rows):
+                self._draw_row(painter, display_row)
 
-        if self._scroll_offset == 0:
-            if self._preedit:
-                self._draw_preedit(painter)
-            else:
-                self._draw_cursor(painter)
+            if self._scroll_offset == 0:
+                if self._preedit:
+                    self._draw_preedit(painter)
+                else:
+                    self._draw_cursor(painter)
 
-        if self._unseen_output and self._scroll_offset > 0:
-            indicator_w = self._cell_w * 3
-            indicator_h = 3
-            indicator_x = self._cols * self._cell_w - indicator_w
-            indicator_y = self._rows * self._cell_h - indicator_h
-            painter.fillRect(indicator_x, indicator_y,
-                             indicator_w, indicator_h,
-                             QColor(255, 200, 0))
-
-        painter.end()
+            if self._unseen_output and self._scroll_offset > 0:
+                indicator_w = self._cell_w * 3
+                indicator_h = 3
+                indicator_x = self._cols * self._cell_w - indicator_w
+                indicator_y = self._rows * self._cell_h - indicator_h
+                painter.fillRect(indicator_x, indicator_y,
+                                 indicator_w, indicator_h,
+                                 QColor(255, 200, 0))
+        except Exception:
+            _log.exception("paintEvent failed")
+        finally:
+            painter.end()
 
     def _draw_row(self, painter: QPainter, display_row: int) -> None:
         y = display_row * self._cell_h
@@ -736,6 +749,12 @@ class TerminalWidget(QWidget):
             self._term.write(seq)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        try:
+            self._mouse_press_impl(event)
+        except Exception:
+            _log.exception("mousePressEvent failed")
+
+    def _mouse_press_impl(self, event: QMouseEvent) -> None:
         col = int(event.position().x() // self._cell_w)
         row = int(event.position().y() // self._cell_h)
         if self._mouse_tracking_active() and not (event.modifiers() & Qt.ShiftModifier):
@@ -795,6 +814,12 @@ class TerminalWidget(QWidget):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        try:
+            self._mouse_release_impl(event)
+        except Exception:
+            _log.exception("mouseReleaseEvent failed")
+
+    def _mouse_release_impl(self, event: QMouseEvent) -> None:
         self._mouse_held = False
         self._drag_start_pos = None
 
@@ -894,6 +919,12 @@ class TerminalWidget(QWidget):
     # ── Keyboard ─────────────────────────────────────────────────────────
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        try:
+            self._key_press_impl(event)
+        except Exception:
+            _log.exception("keyPressEvent failed")
+
+    def _key_press_impl(self, event: QKeyEvent) -> None:
         key = event.key()
         mods = event.modifiers()
 
