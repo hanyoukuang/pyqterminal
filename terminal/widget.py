@@ -92,9 +92,15 @@ class TerminalWidget(QWidget):
             self._term = PtyTerminal(self._cols, self._rows, scrollback=10000)
             self._term.set_accept_osc7(True)
 
+        self._mouse_term = Terminal(self._cols, self._rows)
+
         self._sel_start: tuple[int, int] | None = None
         self._sel_end: tuple[int, int] | None = None
         self._selecting = False
+        self._mouse_held = False
+        self._last_motion_cell = (-1, -1)
+        self._drag_start_pos = None
+        self._drag_start_cell = (0, 0)
         self._preedit = ""
 
         self.setFocusPolicy(Qt.StrongFocus)
@@ -161,6 +167,8 @@ class TerminalWidget(QWidget):
         except Exception:
             pass
 
+        self._sync_mouse_term()
+
         self._bridge_osc()
 
     def _bridge_osc(self) -> None:
@@ -225,6 +233,15 @@ class TerminalWidget(QWidget):
                 subprocess.run(
                     ["notify-send", title or "Terminal", message],
                     capture_output=True, timeout=3)
+        except Exception:
+            pass
+
+    def _sync_mouse_term(self) -> None:
+        try:
+            mode = self._term.mouse_mode()
+            if mode != "off":
+                self._mouse_term.process_str(f"\x1b[?1002h")
+                self._mouse_term.process_str(f"\x1b[?1006h")
         except Exception:
             pass
 
@@ -651,11 +668,10 @@ class TerminalWidget(QWidget):
 
     def _send_mouse_event(self, event: QMouseEvent, pressed: bool,
                             motion: bool = False) -> None:
-        """Forward a mouse event to the PTY when mouse tracking is active."""
         if self._display_only:
             return
-        col = min(int(event.position().x() // self._cell_w), 222)
-        row = min(int(event.position().y() // self._cell_h), 222)
+        col = int(event.position().x() // self._cell_w)
+        row = int(event.position().y() // self._cell_h)
         btn = event.button()
         if btn == Qt.LeftButton:
             code = 0
@@ -665,10 +681,7 @@ class TerminalWidget(QWidget):
             code = 2
         else:
             code = 0
-        if not pressed:
-            code = 3  # release
-        elif motion:
-            code += 32  # drag motion
+
         modifiers = event.modifiers()
         if modifiers & Qt.ShiftModifier:
             code += 4
@@ -676,21 +689,32 @@ class TerminalWidget(QWidget):
             code += 8
         if modifiers & Qt.ControlModifier:
             code += 16
-        try:
-            is_sgr = self._term.mouse_encoding() == MouseEncoding.Sgr
-        except Exception:
-            is_sgr = False
-        if is_sgr:
+
+        is_sgr = self._mouse_term.mouse_encoding() == MouseEncoding.Sgr
+        if not motion:
+            seq = self._mouse_term.simulate_mouse_event(code & 3, col, row, pressed)
+            if seq:
+                self._term.write(seq)
+        elif is_sgr:
+            if pressed:
+                code += 32
             seq = f"\x1b[<{code};{col + 1};{row + 1}{'M' if pressed else 'm'}".encode()
+            self._term.write(seq)
         else:
+            col = min(col, 222)
+            row = min(row, 222)
+            code += 32
             seq = b"\x1b[M" + bytes([code + 32]) + bytes([col + 32]) + bytes([row + 32])
-        self._term.write(seq)
+            self._term.write(seq)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         col = int(event.position().x() // self._cell_w)
         row = int(event.position().y() // self._cell_h)
         if self._mouse_tracking_active() and not (event.modifiers() & Qt.ShiftModifier):
             self._send_mouse_event(event, True)
+            self._mouse_held = True
+            self._last_motion_cell = (col, row)
+            return
 
         if event.button() == Qt.LeftButton and (event.modifiers() & Qt.ControlModifier):
             link = self._hyperlink_at(col, row)
@@ -699,11 +723,14 @@ class TerminalWidget(QWidget):
                 webbrowser.open(link)
                 return
 
+        self._mouse_held = True
+        self._last_motion_cell = (col, row)
+
         if event.button() == Qt.LeftButton:
             self._clear_selection()
-            self._sel_start = (row, col)
-            self._sel_end = (row, col)
-            self._selecting = True
+            self._drag_start_pos = event.position()
+            self._drag_start_cell = (row, col)
+            self._selecting = False
             self.setCursor(Qt.IBeamCursor)
         elif event.button() == Qt.MiddleButton:
             if not self._display_only:
@@ -714,29 +741,44 @@ class TerminalWidget(QWidget):
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        col = max(0, min(self._cols - 1, int(event.position().x() // self._cell_w)))
+        row = max(0, min(self._rows - 1, int(event.position().y() // self._cell_h)))
+        cell_changed = (col, row) != self._last_motion_cell
+
+        if not self._selecting and self._mouse_held and self._drag_start_pos:
+            dx = event.position().x() - self._drag_start_pos.x()
+            dy = event.position().y() - self._drag_start_pos.y()
+            if dx * dx + dy * dy >= 1:  # minimal drag threshold
+                self._selecting = True
+                self._sel_start = self._drag_start_cell
+                self._sel_end = self._drag_start_cell
+
         if self._selecting:
-            col = max(0, min(self._cols - 1,
-                       int(event.position().x() // self._cell_w)))
-            row = max(0, min(self._rows - 1,
-                       int(event.position().y() // self._cell_h)))
             self._sel_end = (row, col)
             self.update()
-        if self._mouse_tracking_active() and event.buttons():
+
+        if self._mouse_tracking_active() and self._mouse_held and cell_changed:
             self._send_mouse_event(event, True, motion=True)
-        elif not self._selecting:
+
+        if cell_changed:
+            self._last_motion_cell = (col, row)
+
+        if not self._selecting and not self._mouse_tracking_active():
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self._mouse_held = False
+        self._drag_start_pos = None
+
         if self._mouse_tracking_active():
             self._send_mouse_event(event, False)
         if event.button() == Qt.LeftButton and self._selecting:
             self._selecting = False
             self.setCursor(Qt.ArrowCursor)
-            if self._sel_start != self._sel_end:
-                text = self._selected_text()
-                if text:
-                    QApplication.clipboard().setText(text)
-                    self.selection_copied.emit(text)
+            text = self._selected_text()
+            if text:
+                QApplication.clipboard().setText(text)
+                self.selection_copied.emit(text)
             else:
                 self._clear_selection()
         else:
@@ -908,6 +950,7 @@ class TerminalWidget(QWidget):
             self._cols = new_cols
             self._rows = new_rows
             self._term.resize(self._cols, self._rows)
+            self._mouse_term.resize(self._cols, self._rows)
 
         self.update()
 
