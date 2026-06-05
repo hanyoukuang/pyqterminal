@@ -124,6 +124,31 @@ class TerminalWidget(QWidget):
         if self._display_only:
             raise RuntimeError("start_shell() not available in display-only mode")
         self._term.spawn_shell()
+        if sys.platform == "win32":
+            self._ensure_start_menu_shortcut()
+
+    @staticmethod
+    def _ensure_start_menu_shortcut() -> None:
+        try:
+            import os, subprocess
+            appdata = os.environ["APPDATA"]
+            shortcut_dir = os.path.join(
+                appdata, r"Microsoft\Windows\Start Menu\Programs\pyqterminal")
+            shortcut_path = os.path.join(shortcut_dir, "pyqterminal.lnk")
+            if os.path.exists(shortcut_path):
+                return
+            os.makedirs(shortcut_dir, exist_ok=True)
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f"$ws=New-Object -ComObject WScript.Shell;"
+                 f"$s=$ws.CreateShortcut('{shortcut_path}');"
+                 f"$s.TargetPath='{sys.executable}';"
+                 f"$s.Arguments='-m terminal';"
+                 f"$s.WorkingDirectory='{os.path.dirname(sys.executable)}';"
+                 f"$s.Save()"],
+                capture_output=True, timeout=5)
+        except Exception:
+            pass
 
     def feed(self, data: str) -> None:
         """Feed text/escape sequences for display (display-only mode).

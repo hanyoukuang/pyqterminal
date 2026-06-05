@@ -34,6 +34,11 @@ def main() -> None:
     app.setApplicationName("pyqterminal")
     app.setApplicationDisplayName("pyqterminal")
 
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "pyqterminal")
+
     widget = TerminalWidget(rows=24, cols=80, display_only=args.display)
     widget.title_changed.connect(widget.setWindowTitle)
     widget.setWindowTitle(
