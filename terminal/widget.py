@@ -278,6 +278,9 @@ class TerminalWidget(QWidget):
             painter.setFont(self._font)
             painter.fillRect(self.rect(), self.DEFAULT_BG)
 
+            # 每帧开始时重置传播缓存，避免上一帧的颜色残留在下一帧
+            self._bg_propagator.reset()
+
             for display_row in range(self._rows):
                 self._draw_row(painter, display_row)
 
