@@ -1015,9 +1015,9 @@ class TerminalWidget(QWidget):
             self._rows = new_rows
             self._term.resize(self._cols, self._rows)
             self._mouse_term.resize(self._cols, self._rows)
-            self._bg_propagator.reset()
             self._bg_propagator._rows = self._rows
             self._bg_propagator._cols = self._cols
+            self._bg_propagator.reset()
 
         self.update()
 
