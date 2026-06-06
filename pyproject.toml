@@ -36,6 +36,11 @@ where = ["."]
 [tool.uv]
 package = true
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
 [project.scripts]
 pyqterminal = "terminal.__main__:main"
 
