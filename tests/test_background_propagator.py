@@ -323,3 +323,115 @@ class TestBackgroundPropagator:
         assert original[0][2] == original_bg_before, (
             f"原始 cells 不应被修改，实际: {original[0][2]}"
         )
+
+    # ---- 11: 修复过的边界条件 ------------------------------------------------
+    def test_resize_updates_cache_dimensions(self):
+        """Bug: resizeEvent 先 reset() 再更新 _rows，导致缓存长度不匹配。
+
+        正确行为：先更新 _rows/_cols，再 reset()。
+        模拟 resize：先设新尺寸再 reset，验证缓存长度正确。
+        """
+        prop = _BackgroundPropagator(rows=10, cols=80)
+        blue = (0, 0, 255)
+
+        # 设置一些缓存
+        prop.process_cells(0, make_row([blue] * 3), "live")
+
+        # 模拟 resize：扩大尺寸
+        prop._rows = 30
+        prop._cols = 120
+        prop.reset()
+
+        # 缓存应正确扩展为 30 行
+        assert len(prop._row_bg_cache) == 30, (
+            f"reset 后缓存长度应为 30，实际: {len(prop._row_bg_cache)}"
+        )
+        assert all(bg is None for bg in prop._row_bg_cache), (
+            "reset 后缓存应全部为 None"
+        )
+
+        # 新尺寸下写入不应越界
+        prop.process_cells(29, make_row([blue] * 3), "live")
+
+    def test_cross_frame_cache_cleared_by_reset(self):
+        """Bug: _row_bg_cache 跨帧持久化导致上一帧颜色残留到下一帧。
+
+        paintEvent 每帧开始时调用 reset()。
+        模拟两帧：第一帧设置缓存，reset()，第二帧应无残留。
+        """
+        prop = _BackgroundPropagator(rows=10, cols=80)
+        blue = (0, 0, 255)
+
+        # Frame 1：设置蓝色背景
+        prop.process_cells(0, make_row([blue] * 3), "live")
+
+        # 帧间 reset（模拟 paintEvent 开头）
+        prop.reset()
+
+        # Frame 2：空行不应继承上一帧的蓝色
+        empty_row = make_row([DEFAULT_BG] * 3)
+        result = prop.process_cells(0, empty_row, "live")
+        for i, cell in enumerate(result):
+            assert cell[2] == DEFAULT_BG, (
+                f"跨帧 reset 后 col{i} 应保持默认黑色，实际: {cell[2]}"
+            )
+
+    def test_mixed_backgrounds_not_propagated(self):
+        """Bug: _compute_row_bg 取第一个非默认 bg，oh-my-zsh 多色提示符误传播。
+
+        行内同时存在白色(icon)和蓝色(git)两种非默认背景 → 应返回 None，不传播。
+        """
+        prop = _BackgroundPropagator(rows=10, cols=80)
+        white = (255, 255, 255)
+        blue = (0, 0, 255)
+
+        # 模拟 oh-my-zsh 提示符：white icon + user@host + blue git branch
+        row = [
+            ('',  DEFAULT_FG, white, MockAttrs()),              # icon 白色背景
+            ('',  DEFAULT_FG, white, MockAttrs()),              # icon 续
+            (' ', DEFAULT_FG, DEFAULT_BG, MockAttrs()),         # 空格
+            ('u', DEFAULT_FG, DEFAULT_BG, MockAttrs()),         # user@host 文字
+            ('s', DEFAULT_FG, DEFAULT_BG, MockAttrs()),
+            (' ', DEFAULT_FG, DEFAULT_BG, MockAttrs()),         # 空格
+            ('g', DEFAULT_FG, blue,  MockAttrs()),              # git branch 蓝色背景
+            ('i', DEFAULT_FG, blue,  MockAttrs()),
+            ('t', DEFAULT_FG, blue,  MockAttrs()),
+            (' ', DEFAULT_FG, DEFAULT_BG, MockAttrs()),         # 空格
+            ('$', DEFAULT_FG, DEFAULT_BG, MockAttrs()),         # 提示符
+        ]
+        result = prop.process_cells(0, row, "live")
+
+        # 空格单元格不应被填充（混合背景，不传播）
+        assert result[2][2] == DEFAULT_BG, (
+            f"混合背景行中空格不应被填充，实际: {result[2][2]}"
+        )
+        assert result[5][2] == DEFAULT_BG, (
+            f"混合背景行中空格不应被填充，实际: {result[5][2]}"
+        )
+        assert result[9][2] == DEFAULT_BG, (
+            f"混合背景行中空格不应被填充，实际: {result[9][2]}"
+        )
+
+    def test_inherited_background_not_cached(self):
+        """Bug: 继承来的背景被缓存，导致无限传播链。
+
+        Row 0 有自身蓝色背景 → Row 1 空行继承 → Row 2 应停止
+        （Row 1 继承来的背景不缓存，Row 2 无源可继承）
+        """
+        prop = _BackgroundPropagator(rows=10, cols=80)
+        blue = (0, 0, 255)
+
+        # Row 0：自身蓝色背景
+        prop.process_cells(0, make_row([blue] * 3), "live")
+
+        # Row 1：空行，继承蓝色（1 跳）但不缓存
+        result1 = prop.process_cells(1, make_row([DEFAULT_BG] * 3), "live")
+        for cell in result1:
+            assert cell[2] == blue
+
+        # Row 2：空行，不应继承（Row 1 背景是继承来的，未缓存）
+        result2 = prop.process_cells(2, make_row([DEFAULT_BG] * 3), "live")
+        for cell in result2:
+            assert cell[2] == DEFAULT_BG, (
+                f"继承来的背景不应被缓存，Row 2 应保持默认，实际: {cell[2]}"
+            )
