@@ -70,26 +70,31 @@ class _BackgroundPropagator:
     def _compute_row_bg(cells: list) -> tuple[int, int, int] | None:
         """从一行 cells 中推断有效背景色。
 
-        扫描 cells，找到第一个 bg != (0,0,0) 且非反向视频、非宽字符分隔符的
-        单元格，返回其背景色。
+        仅当行内所有非默认背景 (bg != (0,0,0)) 的单元格具有相同的背景色时，
+        才返回该颜色。若存在多种不同的非默认背景色（如 oh-my-zsh 多色提示符），
+        返回 None 以避免错误传播。
 
         Args:
             cells: 一行单元格数据列表。
 
         Returns:
-            该行的有效背景色 RGB 元组，若没有则返回 None。
+            该行的统一有效背景色，或 None。
         """
+        first_bg: tuple[int, int, int] | None = None
         for cell in cells:
             char, fg, bg, attrs = cell
-            # 跳过宽字符分隔符 — 它们是占位格，不携带有效背景信息
             if attrs and attrs.wide_char_spacer:
                 continue
-            # 跳过反向视频单元格 — 其背景色可能是交换后的前景色，不可靠
             if attrs and attrs.reverse:
                 continue
-            if bg != (0, 0, 0):
-                return bg
-        return None
+            if bg == (0, 0, 0):
+                continue
+            if first_bg is None:
+                first_bg = bg
+            elif bg != first_bg:
+                # 行内存在多种不同的非默认背景 → 不传播
+                return None
+        return first_bg
 
     def _inherit_from_cache(self, row_idx: int) -> tuple[int, int, int] | None:
         """从上一行的缓存中继承背景色（仅 1 跳）。
