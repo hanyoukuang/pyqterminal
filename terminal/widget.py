@@ -150,8 +150,20 @@ class TerminalWidget(QWidget):
             else:
                 self._term.write_str(data)
         except RuntimeError:
-            self._session_ended = True
-            self.process_exited.emit(-1)
+            self._on_session_ended()
+
+    def _on_session_ended(self) -> None:
+        """Handle PTY session end: stop timers, notify UI, repaint."""
+        if self._session_ended:
+            return
+        self._session_ended = True
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+        self._cursor_timer.stop()
+        self._cursor_visible = False
+        self.process_exited.emit(-1)
+        self.title_changed.emit(self.windowTitle() + " [ended]")
+        self.update()
 
     def feed(self, data: str) -> None:
         """Feed text/escape sequences for display (display-only mode).
@@ -180,7 +192,7 @@ class TerminalWidget(QWidget):
 
     def _poll_updates(self) -> None:
         try:
-            if self._display_only:
+            if self._display_only or self._session_ended:
                 return
             if hasattr(self._term, 'is_alt_screen_active'):
                 try:
