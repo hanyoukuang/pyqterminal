@@ -127,7 +127,7 @@ class TerminalWidget(QWidget):
         if not display_only:
             self._poll_timer = QTimer(self)
             self._poll_timer.timeout.connect(self._poll_updates)
-            self._poll_timer.start(200)  # 16ms→200ms: test polling frequency hypothesis
+            self._poll_timer.start(16)
 
     def start_shell(self) -> None:
         """Start interactive shell (PtyTerminal mode only)."""
