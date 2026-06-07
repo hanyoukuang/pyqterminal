@@ -136,6 +136,8 @@ class TerminalWidget(QWidget):
         try:
             self._term.spawn_shell()
             self._session_ended = False
+            self._stale_polls = 0
+            self._last_cursor = (-1, -1)
             _log.info("PTY session started")
         except Exception:
             _log.exception("spawn_shell failed")
@@ -193,12 +195,25 @@ class TerminalWidget(QWidget):
                     pass
             if self._term.has_updates_since(self._generation):
                 self._generation = self._term.update_generation()
+                self._stale_polls = 0
                 if self._scroll_offset == 0:
                     self._unseen_output = False
                     self.update()
                 elif not self._unseen_output:
                     self._unseen_output = True
                     self.update()
+            else:
+                self._stale_polls += 1
+                if self._stale_polls == 120:
+                    try:
+                        cur = self._term.cursor_position()
+                        if cur != self._last_cursor and self._last_cursor != (-1, -1):
+                            _log.warning(
+                                "cursor moved %s → %s but has_updates_since=False",
+                                self._last_cursor, cur)
+                    except Exception:
+                        pass
+                    self._last_cursor = cur
 
             try:
                 self._term.drain_responses()
