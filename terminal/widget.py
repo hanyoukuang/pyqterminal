@@ -154,17 +154,13 @@ class TerminalWidget(QWidget):
             self._on_session_ended()
 
     def _on_session_ended(self) -> None:
-        """Handle PTY session end: hide cursor, notify UI, drain residual output."""
+        """Handle PTY session end: restore primary screen if stuck in alt screen,
+        hide cursor, notify UI, continue polling briefly for residual output."""
         if self._session_ended:
             return
         self._session_ended = True
 
-    def _try_restore_alt_screen(self) -> None:
-        """Attempt to switch from alt screen to primary screen before PTY dies.
-
-        openCode 等 TUI 被 Ctrl+C 杀时来不及发 \x1b[?1049l。
-        此时 PTY 写通道可能尚未完全关闭，抢发恢复序列。
-        """
+        # 尝试恢复主屏幕（openCode 等 TUI 被杀时来不及发 \x1b[?1049l）
         try:
             if (hasattr(self._term, 'is_alt_screen_active')
                     and self._term.is_alt_screen_active()):
@@ -219,14 +215,12 @@ class TerminalWidget(QWidget):
             try:
                 has_updates = self._term.has_updates_since(self._generation)
             except RuntimeError:
-                self._try_restore_alt_screen()
                 self._on_session_ended()
                 return
             if has_updates:
                 try:
                     self._generation = self._term.update_generation()
                 except RuntimeError:
-                    self._try_restore_alt_screen()
                     self._on_session_ended()
                     return
                 self._idle_polls = 0
@@ -244,7 +238,6 @@ class TerminalWidget(QWidget):
             try:
                 self._term.drain_responses()
             except RuntimeError:
-                self._try_restore_alt_screen()
                 self._on_session_ended()
                 return
             except Exception:
