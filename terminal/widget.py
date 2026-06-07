@@ -78,7 +78,6 @@ class TerminalWidget(QWidget):
         self._blink_visible = True
         self._generation = 0
         self._display_only = display_only
-        self._active_bg = None  # deprecated — replaced by _BackgroundPropagator
         self._prev_title = ""
         self._prev_clipboard = ""
         self._prev_cwd = ""
@@ -388,8 +387,6 @@ class TerminalWidget(QWidget):
             if d['bg_rgb'] != (0, 0, 0):
                 row_bg = d['bg_rgb']
                 break
-
-        # self._active_bg = row_bg  # deprecated — commented out, replaced by _BackgroundPropagator
 
         if row_bg is not None and row_bg != (0, 0, 0):
             painter.fillRect(0, y, self._cols * self._cell_w, self._cell_h,
