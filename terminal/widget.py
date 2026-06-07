@@ -136,6 +136,7 @@ class TerminalWidget(QWidget):
         try:
             self._term.spawn_shell()
             self._session_ended = False
+            self._idle_polls = 0
             _log.info("PTY session started")
         except Exception:
             _log.exception("spawn_shell failed")
@@ -153,14 +154,14 @@ class TerminalWidget(QWidget):
             self._on_session_ended()
 
     def _on_session_ended(self) -> None:
-        """Handle PTY session end: stop timers, notify UI, repaint."""
+        """Handle PTY session end: hide cursor, notify UI, continue polling
+        briefly to drain residual output, then stop timers."""
         if self._session_ended:
             return
         self._session_ended = True
-        if self._poll_timer is not None:
-            self._poll_timer.stop()
         self._cursor_timer.stop()
         self._cursor_visible = False
+        self._idle_polls = 0
         self.process_exited.emit(-1)
         self.title_changed.emit(self.windowTitle() + " [ended]")
         self.update()
@@ -192,7 +193,7 @@ class TerminalWidget(QWidget):
 
     def _poll_updates(self) -> None:
         try:
-            if self._display_only or self._session_ended:
+            if self._display_only:
                 return
             if hasattr(self._term, 'is_alt_screen_active'):
                 try:
@@ -205,12 +206,17 @@ class TerminalWidget(QWidget):
                     pass
             if self._term.has_updates_since(self._generation):
                 self._generation = self._term.update_generation()
+                self._idle_polls = 0
                 if self._scroll_offset == 0:
                     self._unseen_output = False
                     self.update()
                 elif not self._unseen_output:
                     self._unseen_output = True
                     self.update()
+            elif self._session_ended:
+                self._idle_polls += 1
+                if self._idle_polls > 30 and self._poll_timer is not None:
+                    self._poll_timer.stop()
 
             try:
                 self._term.drain_responses()
