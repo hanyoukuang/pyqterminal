@@ -61,8 +61,10 @@ def main() -> None:
 
     print("-" * 65)
     print()
-    print("With \\x1b[K: trailing cells SHOULD be the SGR bg (GREEN/BLUE/RED/...).")
-    print("They are BLACK — cell.reset() in src/grid/erase.rs discards the current bg.")
+    print("With \\x1b[K: trailing cells should match the SGR background color.")
+    print("All 5 EL rows PASS — BCE fixed in v0.42.3.")
+    print()
+    print("Ref: Alacritty erase_chars() uses cursor.template.bg")
 
 
 if __name__ == "__main__":
