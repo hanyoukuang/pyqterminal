@@ -211,11 +211,13 @@ class TerminalWidget(QWidget):
                     self.update()
             else:
                 self._stale_polls += 1
-                if self._stale_polls == 60:
+                if self._stale_polls >= 60:
                     with suppress(Exception):
                         if self._term.synchronized_updates():
                             _log.warning("synchronized_updates stuck, forcing flush")
                             self._term.flush_synchronized_updates()
+                            self._stale_polls = 0
+                            self.update()
 
             with suppress(Exception):
                 self._term.drain_responses()
