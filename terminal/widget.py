@@ -132,6 +132,19 @@ class TerminalWidget(QWidget):
         except Exception:
             _log.exception("spawn_shell failed")
 
+    def _restart_session(self) -> None:
+        """Restart the shell after a previous session ended."""
+        _log.info("restarting PTY session on keypress")
+        self._session_ended = False
+        self._clear_selection()
+        try:
+            self._term.spawn_shell()
+            self._stale_polls = 0
+            self.update()
+        except Exception:
+            _log.exception("session restart failed")
+            self._session_ended = True
+
     def _write_to_pty(self, data: bytes | str) -> None:
         """Write to PTY, silently ignoring if session has ended."""
         if self._session_ended:
@@ -976,6 +989,9 @@ class TerminalWidget(QWidget):
             return
 
         if not self._display_only:
+            if self._session_ended and InputHandler.encode(event) is not None:
+                self._restart_session()
+                return
             data = InputHandler.encode(event)
             if data:
                 self._write_to_pty(data)
