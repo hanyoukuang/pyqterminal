@@ -364,6 +364,20 @@ class TerminalWidget(QWidget):
                 painter.fillRect(indicator_x, indicator_y,
                                  indicator_w, indicator_h,
                                  QColor(255, 200, 0))
+
+            if self._session_ended:
+                from PySide6.QtGui import QColor, QBrush
+                # Draw a semi-transparent overlay
+                painter.fillRect(self.rect(), QBrush(QColor(0, 0, 0, 150)))
+                # Draw centered text
+                text = "Session Ended. Press any key to restart."
+                painter.setPen(QColor(255, 255, 255))
+                font = painter.font()
+                font.setPointSize(font.pointSize() + 2)
+                font.setBold(True)
+                painter.setFont(font)
+                from PySide6.QtCore import Qt
+                painter.drawText(self.rect(), Qt.AlignCenter, text)
         except Exception:
             _log.exception("paintEvent failed")
         finally:
