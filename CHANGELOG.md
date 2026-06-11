@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.3] — 2026-06-11
+
+### Fixed
+- Windows: Prevent process crash when pressing Ctrl+C inside TUI applications (e.g. OpenCode) by ignoring `SIGINT` on Windows in the GUI launcher and widget, allowing conpty to handle the event.
+- Session Restart: Recreate the `PtyTerminal` instance when restarting a terminal session to prevent `spawn_shell` from being called on a dead PTY instance, avoiding process crash/hang.
+- Guarded `self._term` calls: Added try-except blocks to `resizeEvent`, `_change_font_size`, `wheelEvent`, and `_selected_text` to prevent `RuntimeError` crashes when interacting with a closed/dead PTY.
+
+### Changed
+- Upgraded `pyqterminal` version to `0.2.3`.
+
 ## [0.2.2] — 2026-06-08
 
 ### Changed
