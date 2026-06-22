@@ -1,6 +1,6 @@
 # cython: language_level=3
 from pyqterminal.vterm cimport *
-from libc.stdlib cimport malloc, free
+from libc.stdlib cimport malloc, free, realloc
 from libc.string cimport memcpy
 cimport cython
 
@@ -336,6 +336,12 @@ cdef class TerminalScreen:
         }
         
     def resize(self, int rows, int cols):
+        cdef int i
+        if rows != self.rows:
+            self.cb_data.dirty_rows = <bint*>realloc(self.cb_data.dirty_rows, rows * sizeof(bint))
+            if rows > self.rows:
+                for i in range(self.rows, rows):
+                    self.cb_data.dirty_rows[i] = False
         self.rows = rows
         self.cols = cols
         vterm_set_size(self.vt, rows, cols)
