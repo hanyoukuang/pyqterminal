@@ -144,8 +144,7 @@ cdef class TerminalScreen:
     def cursor_visible(self):
         return self.cb_data.cursor_visible
 
-    @property
-    def dirty_rows(self):
+    def get_and_clear_dirty_rows(self):
         cdef set dirty = set()
         cdef int i
         for i in range(self.rows):
@@ -344,7 +343,9 @@ cdef class TerminalScreen:
     def reset(self):
         vterm_state_reset(self.state, 1)
         vterm_screen_reset(self.screen, 1)
-        self.dirty_rows.clear()
+        cdef int i
+        for i in range(self.rows):
+            self.cb_data.dirty_rows[i] = False
         
     def keyboard_unichar(self, uint32_t c, int mod):
         vterm_keyboard_unichar(self.vt, c, <VTermModifier>mod)

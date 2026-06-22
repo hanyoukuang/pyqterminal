@@ -158,7 +158,8 @@ class PyqTerminal(QWidget):
             self.keyPressed.emit(out.decode('utf-8', 'ignore'))
 
     def _do_refresh(self):
-        if self.vt.dirty_rows:
+        dirty = self.vt.get_and_clear_dirty_rows()
+        if dirty:
             scrolled = False
             if self.scroll_offset > 0:
                 self.scroll_offset = 0
@@ -167,12 +168,10 @@ class PyqTerminal(QWidget):
             if scrolled:
                 self.update()
             else:
-                for r in self.vt.dirty_rows:
+                for r in dirty:
                     top = int(self.padding + r * self.char_height)
                     bottom = int(self.padding + (r + 1) * self.char_height)
                     self.update(0, top, self.width(), bottom - top)
-            
-            self.vt.dirty_rows.clear()
         
         self._scrollbar_throttle += 1
         if self._scrollbar_throttle >= 15: # roughly 4 fps for scrollbar updates
