@@ -16,3 +16,6 @@ wheels/
 *.pyd
 cyvterm.c
 uv.lock
+
+# OS Generated Files
+.DS_Store

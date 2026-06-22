@@ -645,13 +645,12 @@ class PyqTerminal(QWidget):
 
                 if bg_color != current_bg:
                     if current_bg is not None and current_bg != self.default_bg:
+                        top = int(self.padding + y * self.char_height)
+                        bottom = int(self.padding + (y + 1) * self.char_height)
+                        left = int(self.padding + start_x * self.char_width)
+                        right = int(self.padding + x * self.char_width)
                         painter.fillRect(
-                            QRect(
-                                self.padding + start_x * self.char_width,
-                                self.padding + y * self.char_height,
-                                (x - start_x) * self.char_width,
-                                self.char_height,
-                            ),
+                            QRect(left, top, right - left, bottom - top),
                             current_bg,
                         )
                     start_x = x
@@ -661,13 +660,12 @@ class PyqTerminal(QWidget):
                     skip_next = True
 
             if current_bg is not None and current_bg != self.default_bg:
+                top = int(self.padding + y * self.char_height)
+                bottom = int(self.padding + (y + 1) * self.char_height)
+                left = int(self.padding + start_x * self.char_width)
+                right = int(self.padding + self.cols * self.char_width)
                 painter.fillRect(
-                    QRect(
-                        self.padding + start_x * self.char_width,
-                        self.padding + y * self.char_height,
-                        (self.cols - start_x) * self.char_width,
-                        self.char_height,
-                    ),
+                    QRect(left, top, right - left, bottom - top),
                     current_bg,
                 )
 
@@ -690,12 +688,11 @@ class PyqTerminal(QWidget):
                     continue
 
                 data = char['data']
-                rect = QRectF(
-                    self.padding + x * self.char_width,
-                    self.padding + y * self.char_height,
-                    self.char_width,
-                    self.char_height,
-                )
+                top = int(self.padding + y * self.char_height)
+                bottom = int(self.padding + (y + 1) * self.char_height)
+                left = int(self.padding + x * self.char_width)
+                right = int(self.padding + (x + 1) * self.char_width)
+                rect = QRectF(left, top, right - left, bottom - top)
 
                 fg_color = self._get_color(char['fg'], is_bg=False)
                 if char['reverse']:
@@ -804,10 +801,9 @@ class PyqTerminal(QWidget):
             and min_y <= self.vt.cursor_y <= max_y
             and 0 <= self.vt.cursor_x < self.cols
         ):
-            cursor_rect = QRectF(
-                self.padding + self.vt.cursor_x * self.char_width,
-                self.padding + self.vt.cursor_y * self.char_height,
-                self.char_width,
-                self.char_height,
-            )
+            top = int(self.padding + self.vt.cursor_y * self.char_height)
+            bottom = int(self.padding + (self.vt.cursor_y + 1) * self.char_height)
+            left = int(self.padding + self.vt.cursor_x * self.char_width)
+            right = int(self.padding + (self.vt.cursor_x + 1) * self.char_width)
+            cursor_rect = QRectF(left, top, right - left, bottom - top)
             painter.fillRect(cursor_rect, QColor(255, 255, 255, 128))
