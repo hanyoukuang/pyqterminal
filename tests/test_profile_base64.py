@@ -1,0 +1,25 @@
+import time
+import os
+import base64
+from terminal import PyqTerminal
+from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QPaintEvent
+from PySide6.QtCore import QRect
+
+app = QApplication([])
+term = PyqTerminal()
+term.show()
+
+# Fill with base64 data
+data = base64.b64encode(os.urandom(80 * 24)).decode('utf-8')
+lines = [data[i:i+80] + "\r\n" for i in range(0, len(data), 80)]
+for line in lines:
+    term.write(line)
+
+t0 = time.time()
+for _ in range(60):
+    term.paintEvent(QPaintEvent(term.rect()))
+t1 = time.time()
+
+print(f"60 paintEvents took: {t1 - t0:.3f} seconds")
+print(f"1 paintEvent = {(t1 - t0) / 60 * 1000:.1f} ms")
