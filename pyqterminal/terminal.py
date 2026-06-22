@@ -78,9 +78,9 @@ class PyqTerminal(QWidget):
         self.scrollbar.valueChanged.connect(self._on_scroll_bar)
         self.scrollbar.hide()
 
-        # Render throttler (60fps)
+        # Render throttler (500fps target for ultra-low latency)
         self._refresh_timer = QTimer(self)
-        self._refresh_timer.setInterval(16)
+        self._refresh_timer.setInterval(2)
         self._refresh_timer.timeout.connect(self._do_refresh)
         self._refresh_timer.start()
 
@@ -174,7 +174,7 @@ class PyqTerminal(QWidget):
                     self.update(0, top, self.width(), bottom - top)
         
         self._scrollbar_throttle += 1
-        if self._scrollbar_throttle >= 15: # roughly 4 fps for scrollbar updates
+        if self._scrollbar_throttle >= 125: # roughly 4 fps for scrollbar updates
             self._update_scrollbar()
             self._scrollbar_throttle = 0
 
