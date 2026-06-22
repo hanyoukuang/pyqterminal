@@ -9,7 +9,7 @@ extensions = [
         "pyqterminal.cyvterm",
         sources=["pyqterminal/cyvterm.pyx"] + vterm_sources,
         include_dirs=["vendor/libvterm/include"],
-        extra_compile_args=["-std=c99", "-O3", "-march=native", "-flto"],
+        extra_compile_args=["-std=c99", "-O3", "-flto"],
         extra_link_args=["-O3", "-flto"],
     )
 ]
