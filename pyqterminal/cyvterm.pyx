@@ -1,21 +1,36 @@
 # cython: language_level=3
 from pyqterminal.vterm cimport *
 from libc.stdlib cimport malloc, free
+from libc.string cimport memcpy
 cimport cython
-from collections import deque
+
+cdef struct ScrollbackLine:
+    int cols
+    VTermScreenCell *cells
+
+cdef struct ScreenCallbackData:
+    void *py_screen_ptr
+    ScrollbackLine* history_buf
+    int hist_head
+    int hist_tail
+    int hist_count
+    int history_size
 
 cdef int on_damage(VTermRect rect, void *user) noexcept with gil:
-    cdef TerminalScreen screen = <TerminalScreen>user
+    cdef ScreenCallbackData *cb_data = <ScreenCallbackData*>user
+    cdef TerminalScreen screen = <TerminalScreen>(cb_data.py_screen_ptr)
     screen.mark_dirty(rect.start_row, rect.end_row)
     return 1
 
 cdef int on_moverect(VTermRect dest, VTermRect src, void *user) noexcept with gil:
-    cdef TerminalScreen screen = <TerminalScreen>user
+    cdef ScreenCallbackData *cb_data = <ScreenCallbackData*>user
+    cdef TerminalScreen screen = <TerminalScreen>(cb_data.py_screen_ptr)
     screen.mark_dirty(dest.start_row, dest.end_row)
     return 1
 
 cdef int on_movecursor(VTermPos pos, VTermPos oldpos, int visible, void *user) noexcept with gil:
-    cdef TerminalScreen screen = <TerminalScreen>user
+    cdef ScreenCallbackData *cb_data = <ScreenCallbackData*>user
+    cdef TerminalScreen screen = <TerminalScreen>(cb_data.py_screen_ptr)
     screen.cursor_x = pos.col
     screen.cursor_y = pos.row
     screen.cursor_visible = visible
@@ -23,11 +38,22 @@ cdef int on_movecursor(VTermPos pos, VTermPos oldpos, int visible, void *user) n
     screen.mark_dirty(pos.row, pos.row + 1)
     return 1
 
-cdef int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user) noexcept with gil:
-    cdef TerminalScreen screen = <TerminalScreen>user
-    cdef size_t line_size = cols * sizeof(VTermScreenCell)
-    cdef bytes raw_line = (<char*>cells)[:line_size]
-    screen.push_scrollback((cols, raw_line))
+cdef int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user) noexcept nogil:
+    cdef ScreenCallbackData *cb_data = <ScreenCallbackData*>user
+    cdef ScrollbackLine line
+    line.cols = cols
+    line.cells = <VTermScreenCell*>malloc(cols * sizeof(VTermScreenCell))
+    memcpy(line.cells, cells, cols * sizeof(VTermScreenCell))
+    
+    if cb_data.hist_count == cb_data.history_size:
+        free(cb_data.history_buf[cb_data.hist_head].cells)
+        cb_data.history_buf[cb_data.hist_head] = line
+        cb_data.hist_head = (cb_data.hist_head + 1) % cb_data.history_size
+        cb_data.hist_tail = (cb_data.hist_tail + 1) % cb_data.history_size
+    else:
+        cb_data.history_buf[cb_data.hist_tail] = line
+        cb_data.hist_tail = (cb_data.hist_tail + 1) % cb_data.history_size
+        cb_data.hist_count += 1
     return 1
 
 cdef _convert_color(VTermColor color):
@@ -61,8 +87,7 @@ cdef class TerminalScreen:
     cdef public int cursor_y
     cdef public bint cursor_visible
     cdef public set dirty_rows
-    cdef object _history
-    cdef int history_size
+    cdef ScreenCallbackData* cb_data
     
     def __cinit__(self, int rows, int cols, int history_size=10000):
         self.rows = rows
@@ -77,69 +102,165 @@ cdef class TerminalScreen:
         vterm_screen_enable_altscreen(self.screen, 1)
         vterm_screen_reset(self.screen, 1)
         
-        vterm_screen_set_callbacks(self.screen, &cb, <void*>self)
-        
         self.cursor_x = 0
         self.cursor_y = 0
         self.cursor_visible = True
         self.dirty_rows = set()
-        self._history = deque(maxlen=history_size)
-        self.history_size = history_size
+        
+        self.cb_data = <ScreenCallbackData*>malloc(sizeof(ScreenCallbackData))
+        self.cb_data.py_screen_ptr = <void*>self
+        self.cb_data.history_size = history_size
+        self.cb_data.history_buf = <ScrollbackLine*>malloc(history_size * sizeof(ScrollbackLine))
+        self.cb_data.hist_head = 0
+        self.cb_data.hist_tail = 0
+        self.cb_data.hist_count = 0
+        
+        vterm_screen_set_callbacks(self.screen, &cb, <void*>self.cb_data)
         
     def __dealloc__(self):
+        cdef int i, idx
         if self.vt != NULL:
             vterm_free(self.vt)
+        if self.cb_data != NULL:
+            if self.cb_data.history_buf != NULL:
+                for i in range(self.cb_data.hist_count):
+                    idx = (self.cb_data.hist_head + i) % self.cb_data.history_size
+                    free(self.cb_data.history_buf[idx].cells)
+                free(self.cb_data.history_buf)
+            free(self.cb_data)
             
     cdef void mark_dirty(self, int start_row, int end_row):
         for r in range(start_row, end_row):
             self.dirty_rows.add(r)
             
-    cdef void push_scrollback(self, tuple line_data):
-        self._history.append(line_data)
-        
     def history_len(self):
-        return len(self._history)
+        return self.cb_data.hist_count
         
-    def get_history_line(self, int index):
-        cdef tuple line_data = self._history[index]
-        cdef int cols = line_data[0]
-        cdef bytes raw_line = line_data[1]
-        cdef const char* raw_ptr = raw_line
-        cdef const VTermScreenCell* cells = <const VTermScreenCell*>raw_ptr
-        
-        cdef list line = []
+    cdef list _build_runs(self, VTermScreenCell* cells, int cols):
+        cdef list runs = []
         cdef int i, j
         cdef uint32_t char_code
         cdef VTermColor fg, bg
+        cdef str chars_str
+        
+        cdef str run_data = ""
+        cdef int run_width = 0
+        cdef VTermScreenCell* first_cell = NULL
+        cdef VTermScreenCell* cell
+        cdef bint is_empty = False
+        cdef bint prev_empty = False
+        cdef bint is_block = False
+        cdef bint first_is_block = False
+        cdef bint merge
         
         for i in range(cols):
-            cell_data = {}
+            cell = &cells[i]
+            char_code = cell.chars[0]
+            is_empty = (char_code == 0)
+            is_block = (char_code == 0x2588 or char_code == 0x2580 or char_code == 0x2584)
+            
+            merge = False
+            if first_cell != NULL:
+                first_is_block = (first_cell.chars[0] == 0x2588 or first_cell.chars[0] == 0x2580 or first_cell.chars[0] == 0x2584)
+                if is_block or first_is_block:
+                    merge = False
+                else:
+                    if (cell.attrs.bold == first_cell.attrs.bold and
+                        cell.attrs.underline == first_cell.attrs.underline and
+                        cell.attrs.italic == first_cell.attrs.italic and
+                        cell.attrs.strike == first_cell.attrs.strike and
+                        cell.attrs.reverse == first_cell.attrs.reverse and
+                        cell.fg.type == first_cell.fg.type and
+                        cell.bg.type == first_cell.bg.type):
+                        
+                        merge = True
+                        if cell.fg.type == 1:
+                            merge = (cell.fg.indexed.idx == first_cell.fg.indexed.idx)
+                        elif cell.fg.type == 2:
+                            merge = (cell.fg.rgb.red == first_cell.fg.rgb.red and
+                                     cell.fg.rgb.green == first_cell.fg.rgb.green and
+                                     cell.fg.rgb.blue == first_cell.fg.rgb.blue)
+                            
+                        if merge:
+                            if cell.bg.type == 1:
+                                merge = (cell.bg.indexed.idx == first_cell.bg.indexed.idx)
+                            elif cell.bg.type == 2:
+                                merge = (cell.bg.rgb.red == first_cell.bg.rgb.red and
+                                         cell.bg.rgb.green == first_cell.bg.rgb.green and
+                                         cell.bg.rgb.blue == first_cell.bg.rgb.blue)
+                                         
+            if not merge and first_cell != NULL:
+                fg = first_cell.fg
+                bg = first_cell.bg
+                vterm_screen_convert_color_to_rgb(self.screen, &fg)
+                vterm_screen_convert_color_to_rgb(self.screen, &bg)
+                runs.append((
+                    run_data,
+                    run_width,
+                    _convert_color(fg),
+                    _convert_color(bg),
+                    first_cell.attrs.bold,
+                    first_cell.attrs.italic,
+                    first_cell.attrs.underline,
+                    first_cell.attrs.strike,
+                    first_cell.attrs.reverse
+                ))
+                first_cell = NULL
+                run_data = ""
+                run_width = 0
+                
+            if first_cell == NULL:
+                first_cell = cell
+                prev_empty = is_empty
+                
             chars_str = ""
             for j in range(6):
-                char_code = cells[i].chars[j]
+                char_code = cell.chars[j]
                 if char_code == 0 or char_code > 0x10FFFF:
                     break
-                chars_str += chr(char_code)
-                
-            cell_data['data'] = chars_str
-            cell_data['width'] = cells[i].width
-            cell_data['bold'] = cells[i].attrs.bold
-            cell_data['underline'] = cells[i].attrs.underline
-            cell_data['italics'] = cells[i].attrs.italic
-            cell_data['strikethrough'] = cells[i].attrs.strike
-            cell_data['reverse'] = cells[i].attrs.reverse
+                if char_code != 0xFFFFFFFF:
+                    chars_str += chr(char_code)
             
-            fg = cells[i].fg
-            bg = cells[i].bg
+            run_data += chars_str
+            run_width += cell.width
+            
+        if first_cell != NULL:
+            fg = first_cell.fg
+            bg = first_cell.bg
             vterm_screen_convert_color_to_rgb(self.screen, &fg)
             vterm_screen_convert_color_to_rgb(self.screen, &bg)
+            runs.append((
+                run_data,
+                run_width,
+                _convert_color(fg),
+                _convert_color(bg),
+                first_cell.attrs.bold,
+                first_cell.attrs.italic,
+                first_cell.attrs.underline,
+                first_cell.attrs.strike,
+                first_cell.attrs.reverse
+            ))
             
-            cell_data['fg'] = _convert_color(fg)
-            cell_data['bg'] = _convert_color(bg)
-            
-            line.append(cell_data)
-            
-        return line
+        return runs
+
+    def get_history_line(self, int index):
+        if index < 0 or index >= self.cb_data.hist_count:
+            return []
+        cdef int real_idx = (self.cb_data.hist_head + index) % self.cb_data.history_size
+        cdef ScrollbackLine line_data = self.cb_data.history_buf[real_idx]
+        return self._build_runs(line_data.cells, line_data.cols)
+        
+    def get_line(self, int row):
+        cdef VTermPos pos
+        pos.row = row
+        cdef VTermScreenCell* cells = <VTermScreenCell*>malloc(self.cols * sizeof(VTermScreenCell))
+        cdef int i
+        for i in range(self.cols):
+            pos.col = i
+            vterm_screen_get_cell(self.screen, pos, &cells[i])
+        cdef list runs = self._build_runs(cells, self.cols)
+        free(cells)
+        return runs
         
     def feed(self, bytes data):
         cdef const char* c_string = data

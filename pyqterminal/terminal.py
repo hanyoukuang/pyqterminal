@@ -631,43 +631,40 @@ class PyqTerminal(QWidget):
             if L < N:
                 line = self.vt.get_history_line(L)
             else:
-                line = [self.vt.get_cell(L - N, c) for c in range(self.cols)]
+                line = self.vt.get_line(L - N)
 
             start_x = 0
             current_bg = None
-            skip_next = False
 
-            for x in range(self.cols):
-                if skip_next:
-                    skip_next = False
+            x = 0
+            for run in line:
+                data, width, fg, bg, bold, italic, underline, strike, reverse = run
+                if width == 0:
                     continue
-                    
-                char = line[x]
-                if not char: continue
-                bg_color = self._get_color(char['bg'], is_bg=True)
-                if char['reverse']:
-                    bg_color = self._get_color(char['fg'], is_bg=False)
-                if self._is_selected(y, x, sel_range):
-                    fg_temp = self._get_color(char['fg'], is_bg=False)
-                    if char['reverse']:
-                        fg_temp = self._get_color(char['bg'], is_bg=True)
-                    bg_color = fg_temp
+                
+                for i in range(width):
+                    bg_color = self._get_color(bg, is_bg=True)
+                    if reverse:
+                        bg_color = self._get_color(fg, is_bg=False)
+                    if self._is_selected(y, x + i, sel_range):
+                        fg_temp = self._get_color(fg, is_bg=False)
+                        if reverse:
+                            fg_temp = self._get_color(bg, is_bg=True)
+                        bg_color = fg_temp
 
-                if bg_color != current_bg:
-                    if current_bg is not None and current_bg != self.default_bg:
-                        top = int(self.padding + y * self.char_height)
-                        bottom = int(self.padding + (y + 1) * self.char_height)
-                        left = int(self.padding + start_x * self.char_width)
-                        right = int(self.padding + x * self.char_width)
-                        painter.fillRect(
-                            QRect(left, top, right - left, bottom - top),
-                            current_bg,
-                        )
-                    start_x = x
-                    current_bg = bg_color
-                    
-                if char['width'] == 2:
-                    skip_next = True
+                    if bg_color != current_bg:
+                        if current_bg is not None and current_bg != self.default_bg:
+                            top = int(self.padding + y * self.char_height)
+                            bottom = int(self.padding + (y + 1) * self.char_height)
+                            left = int(self.padding + start_x * self.char_width)
+                            right = int(self.padding + (x + i) * self.char_width)
+                            painter.fillRect(
+                                QRectF(left, top, right - left, bottom - top),
+                                current_bg,
+                            )
+                        start_x = x + i
+                        current_bg = bg_color
+                x += width
 
             if current_bg is not None and current_bg != self.default_bg:
                 top = int(self.padding + y * self.char_height)
@@ -675,7 +672,7 @@ class PyqTerminal(QWidget):
                 left = int(self.padding + start_x * self.char_width)
                 right = int(self.padding + self.cols * self.char_width)
                 painter.fillRect(
-                    QRect(left, top, right - left, bottom - top),
+                    QRectF(left, top, right - left, bottom - top),
                     current_bg,
                 )
 
@@ -688,73 +685,73 @@ class PyqTerminal(QWidget):
             if L < N:
                 line = self.vt.get_history_line(L)
             else:
-                line = [self.vt.get_cell(L - N, c) for c in range(self.cols)]
+                line = self.vt.get_line(L - N)
 
             x = 0
-            while x < self.cols:
-                char = line[x]
-                if not char or char['data'] in ("", None):
-                    x += 1
+            for run in line:
+                data, width, fg, bg, bold, italic, underline, strike, reverse = run
+                if not data:
+                    x += width
                     continue
 
-                data = char['data']
                 top = int(self.padding + y * self.char_height)
                 bottom = int(self.padding + (y + 1) * self.char_height)
                 left = int(self.padding + x * self.char_width)
-                right = int(self.padding + (x + 1) * self.char_width)
+                right = int(self.padding + (x + width) * self.char_width)
                 rect = QRectF(left, top, right - left, bottom - top)
 
-                fg_color = self._get_color(char['fg'], is_bg=False)
-                if char['reverse']:
-                    fg_color = self._get_color(char['bg'], is_bg=True)
+                # Determine foreground color
                 is_sel = self._is_selected(y, x, sel_range)
+                fg_color = self._get_color(fg, is_bg=False)
+                if reverse:
+                    fg_color = self._get_color(bg, is_bg=True)
                 if is_sel:
-                    bg_temp = self._get_color(char['bg'], is_bg=True)
-                    if char['reverse']:
-                        bg_temp = self._get_color(char['fg'], is_bg=False)
+                    bg_temp = self._get_color(bg, is_bg=True)
+                    if reverse:
+                        bg_temp = self._get_color(fg, is_bg=False)
                     fg_color = bg_temp
 
                 # Custom rendering for block elements
                 if data == "\u2588":
                     painter.fillRect(rect, fg_color)
-                    x += 1
+                    x += width
                     continue
                 elif data == "\u2580":
                     painter.fillRect(QRectF(rect.left(), rect.top(), rect.width(), rect.height() / 2.0), fg_color)
-                    x += 1
+                    x += width
                     continue
                 elif data == "\u2584":
                     hh = rect.height() / 2.0
                     painter.fillRect(QRectF(rect.left(), rect.top() + hh, rect.width(), rect.height() - hh), fg_color)
-                    x += 1
+                    x += width
                     continue
                 elif data == "\u258c":
                     painter.fillRect(QRectF(rect.left(), rect.top(), rect.width() / 2.0, rect.height()), fg_color)
-                    x += 1
+                    x += width
                     continue
                 elif data == "\u2590":
                     hw = rect.width() / 2.0
                     painter.fillRect(QRectF(rect.left() + hw, rect.top(), rect.width() - hw, rect.height()), fg_color)
-                    x += 1
+                    x += width
                     continue
 
                 # Normal text rendering
                 # Skip pure background spaces
-                if data == " ":
-                    x += 1
+                if data == " " * len(data):
+                    x += width
                     continue
 
-                font_key = (char['bold'], char['italics'], char['underline'], char['strikethrough'])
+                font_key = (bold, italic, underline, strike)
                 if font_key != last_font_key:
                     if font_key == (False, False, False, False):
                         painter.setFont(self.terminal_font)
                     else:
                         if font_key not in self._font_cache:
                             f = QFont(self.terminal_font)
-                            f.setBold(char['bold'])
-                            f.setItalic(char['italics'])
-                            f.setUnderline(char['underline'])
-                            f.setStrikeOut(char['strikethrough'])
+                            f.setBold(bold)
+                            f.setItalic(italic)
+                            f.setUnderline(underline)
+                            f.setStrikeOut(strike)
                             self._font_cache[font_key] = f
                         painter.setFont(self._font_cache[font_key])
                     last_font_key = font_key
@@ -763,47 +760,19 @@ class PyqTerminal(QWidget):
                     painter.setPen(fg_color)
                     last_pen_color = fg_color
 
-                is_wide = char.get('width', 1) == 2
+                is_wide = width == 2 and len(data) == 1
                 
                 # If wide character or non-ASCII, draw individually
-                if is_wide or ord(data) > 127:
+                if is_wide or ord(data[0]) > 127:
                     char_real_width = self.metrics.horizontalAdvance(data)
-                    cell_width = self.char_width * 2 if is_wide else self.char_width
+                    cell_width = self.char_width * width
                     x_offset = rect.left() + (cell_width - char_real_width) / 2
                     painter.drawText(QPointF(x_offset, rect.top() + self.ascent), data)
-                    x += (2 if is_wide else 1)
+                    x += width
                     continue
                     
-                # Otherwise, it's an ASCII width-1 char. Group consecutive identical styles!
-                segment_text = data
-                start_x = x
-                x += 1
-                
-                while x < self.cols:
-                    next_char = line[x]
-                    if not next_char or next_char['data'] in ("", None):
-                        break
-                    ndata = next_char['data']
-                    if ndata in ("\u2588", "\u2580", "\u2584", "\u258c", "\u2590"):
-                        break
-                    
-                    if next_char.get('width', 1) == 2 or ord(ndata) > 127:
-                        break
-                        
-                    if next_char['fg'] != char['fg'] or next_char['bg'] != char['bg'] or next_char['reverse'] != char['reverse']:
-                        break
-                    if next_char['bold'] != char['bold'] or next_char['italics'] != char['italics'] or next_char['underline'] != char['underline'] or next_char['strikethrough'] != char['strikethrough']:
-                        break
-                    if self._is_selected(y, x, sel_range) != is_sel:
-                        break
-                        
-                    segment_text += ndata
-                    x += 1
-                
-                painter.drawText(
-                    QPointF(self.padding + start_x * self.char_width, rect.top() + self.ascent),
-                    segment_text
-                )
+                painter.drawText(QPointF(rect.left(), rect.top() + self.ascent), data)
+                x += width
 
         if (
             self.scroll_offset == 0
