@@ -25,6 +25,8 @@ setup(
             'wraparound': False,
             'cdivision': True,
             'initializedcheck': False,
-        }
+            'profile': True,
+        },
+        annotate=True
     ),
 )

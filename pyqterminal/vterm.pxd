@@ -75,7 +75,7 @@ cdef extern from "vterm.h":
     void vterm_free(VTerm *vt)
     void vterm_set_utf8(VTerm *vt, int is_utf8)
     
-    void vterm_input_write(VTerm *vt, const char *bytes, size_t len)
+    void vterm_input_write(VTerm *vt, const char *bytes, size_t len) nogil
     size_t vterm_output_get_buffer_current(VTerm *vt)
     size_t vterm_output_read(VTerm *vt, char *buffer, size_t len)
 

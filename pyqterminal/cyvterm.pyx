@@ -15,27 +15,32 @@ cdef struct ScreenCallbackData:
     int hist_tail
     int hist_count
     int history_size
+    bint* dirty_rows
+    int cursor_x
+    int cursor_y
+    int cursor_visible
 
-cdef int on_damage(VTermRect rect, void *user) noexcept with gil:
+cdef int on_damage(VTermRect rect, void *user) noexcept nogil:
     cdef ScreenCallbackData *cb_data = <ScreenCallbackData*>user
-    cdef TerminalScreen screen = <TerminalScreen>(cb_data.py_screen_ptr)
-    screen.mark_dirty(rect.start_row, rect.end_row)
+    cdef int r
+    for r in range(rect.start_row, rect.end_row):
+        cb_data.dirty_rows[r] = True
     return 1
 
-cdef int on_moverect(VTermRect dest, VTermRect src, void *user) noexcept with gil:
+cdef int on_moverect(VTermRect dest, VTermRect src, void *user) noexcept nogil:
     cdef ScreenCallbackData *cb_data = <ScreenCallbackData*>user
-    cdef TerminalScreen screen = <TerminalScreen>(cb_data.py_screen_ptr)
-    screen.mark_dirty(dest.start_row, dest.end_row)
+    cdef int r
+    for r in range(dest.start_row, dest.end_row):
+        cb_data.dirty_rows[r] = True
     return 1
 
-cdef int on_movecursor(VTermPos pos, VTermPos oldpos, int visible, void *user) noexcept with gil:
+cdef int on_movecursor(VTermPos pos, VTermPos oldpos, int visible, void *user) noexcept nogil:
     cdef ScreenCallbackData *cb_data = <ScreenCallbackData*>user
-    cdef TerminalScreen screen = <TerminalScreen>(cb_data.py_screen_ptr)
-    screen.cursor_x = pos.col
-    screen.cursor_y = pos.row
-    screen.cursor_visible = visible
-    screen.mark_dirty(oldpos.row, oldpos.row + 1)
-    screen.mark_dirty(pos.row, pos.row + 1)
+    cb_data.cursor_x = pos.col
+    cb_data.cursor_y = pos.row
+    cb_data.cursor_visible = visible
+    cb_data.dirty_rows[oldpos.row] = True
+    cb_data.dirty_rows[pos.row] = True
     return 1
 
 cdef int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user) noexcept nogil:
@@ -80,14 +85,9 @@ cdef class TerminalScreen:
     cdef VTerm *vt
     cdef VTermScreen *screen
     cdef VTermState *state
-    
     cdef public int rows
     cdef public int cols
-    cdef public int cursor_x
-    cdef public int cursor_y
-    cdef public bint cursor_visible
-    cdef public set dirty_rows
-    cdef ScreenCallbackData* cb_data
+    cdef ScreenCallbackData *cb_data
     
     def __cinit__(self, int rows, int cols, int history_size=10000):
         self.rows = rows
@@ -102,11 +102,6 @@ cdef class TerminalScreen:
         vterm_screen_enable_altscreen(self.screen, 1)
         vterm_screen_reset(self.screen, 1)
         
-        self.cursor_x = 0
-        self.cursor_y = 0
-        self.cursor_visible = True
-        self.dirty_rows = set()
-        
         self.cb_data = <ScreenCallbackData*>malloc(sizeof(ScreenCallbackData))
         self.cb_data.py_screen_ptr = <void*>self
         self.cb_data.history_size = history_size
@@ -114,24 +109,50 @@ cdef class TerminalScreen:
         self.cb_data.hist_head = 0
         self.cb_data.hist_tail = 0
         self.cb_data.hist_count = 0
+        self.cb_data.dirty_rows = <bint*>malloc(rows * sizeof(bint))
+        cdef int i
+        for i in range(rows):
+            self.cb_data.dirty_rows[i] = False
+        self.cb_data.cursor_x = 0
+        self.cb_data.cursor_y = 0
+        self.cb_data.cursor_visible = True
         
         vterm_screen_set_callbacks(self.screen, &cb, <void*>self.cb_data)
         
     def __dealloc__(self):
         cdef int i, idx
-        if self.vt != NULL:
-            vterm_free(self.vt)
         if self.cb_data != NULL:
-            if self.cb_data.history_buf != NULL:
-                for i in range(self.cb_data.hist_count):
-                    idx = (self.cb_data.hist_head + i) % self.cb_data.history_size
-                    free(self.cb_data.history_buf[idx].cells)
-                free(self.cb_data.history_buf)
+            for i in range(self.cb_data.hist_count):
+                idx = (self.cb_data.hist_head + i) % self.cb_data.history_size
+                free(self.cb_data.history_buf[idx].cells)
+            free(self.cb_data.history_buf)
+            free(self.cb_data.dirty_rows)
             free(self.cb_data)
             
-    cdef void mark_dirty(self, int start_row, int end_row):
-        for r in range(start_row, end_row):
-            self.dirty_rows.add(r)
+        if self.vt != NULL:
+            vterm_free(self.vt)
+            
+    @property
+    def cursor_x(self):
+        return self.cb_data.cursor_x
+
+    @property
+    def cursor_y(self):
+        return self.cb_data.cursor_y
+
+    @property
+    def cursor_visible(self):
+        return self.cb_data.cursor_visible
+
+    @property
+    def dirty_rows(self):
+        cdef set dirty = set()
+        cdef int i
+        for i in range(self.rows):
+            if self.cb_data.dirty_rows[i]:
+                dirty.add(i)
+                self.cb_data.dirty_rows[i] = False
+        return dirty
             
     def history_len(self):
         return self.cb_data.hist_count
@@ -264,7 +285,9 @@ cdef class TerminalScreen:
         
     def feed(self, bytes data):
         cdef const char* c_string = data
-        vterm_input_write(self.vt, c_string, len(data))
+        cdef int length = len(data)
+        with nogil:
+            vterm_input_write(self.vt, c_string, length)
         
     def read_output(self):
         cdef size_t out_len = vterm_output_get_buffer_current(self.vt)
