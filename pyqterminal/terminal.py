@@ -159,9 +159,19 @@ class PyqTerminal(QWidget):
 
     def _do_refresh(self):
         if self.vt.dirty_rows:
+            scrolled = False
             if self.scroll_offset > 0:
                 self.scroll_offset = 0
-            self.update()
+                scrolled = True
+            
+            if scrolled:
+                self.update()
+            else:
+                for r in self.vt.dirty_rows:
+                    top = int(self.padding + r * self.char_height)
+                    bottom = int(self.padding + (r + 1) * self.char_height)
+                    self.update(0, top, self.width(), bottom - top)
+            
             self.vt.dirty_rows.clear()
         
         self._scrollbar_throttle += 1
