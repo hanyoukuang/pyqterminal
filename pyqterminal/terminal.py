@@ -76,7 +76,30 @@ class PyqTerminal(QWidget):
         # Scrollbar
         self.scrollbar = QScrollBar(Qt.Vertical, self)
         self.scrollbar.valueChanged.connect(self._on_scroll_bar)
-        self.scrollbar.hide()
+        self.scrollbar.setStyleSheet("""
+            QScrollBar:vertical { 
+                background: #1e1e1e; 
+                width: 14px; 
+                border-left: 1px solid #333;
+                margin: 0px;
+            } 
+            QScrollBar::handle:vertical { 
+                background: #555; 
+                min-height: 20px; 
+                border-radius: 6px; 
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #777;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+        self.scrollbar.show()
 
         # Render throttler (60fps target)
         self._refresh_timer = QTimer(self)
@@ -180,12 +203,16 @@ class PyqTerminal(QWidget):
 
     def _update_scrollbar(self):
         total = self.vt.history_len()
-        if total == 0:
-            if not self.scrollbar.isHidden():
-                self.scrollbar.hide()
-            return
         if self.scrollbar.isHidden():
             self.scrollbar.show()
+            
+        if total == 0:
+            self.scrollbar.blockSignals(True)
+            self.scrollbar.setMaximum(0)
+            self.scrollbar.setPageStep(self.rows)
+            self.scrollbar.setValue(0)
+            self.scrollbar.blockSignals(False)
+            return
         
         # Only update if values actually changed to prevent expensive Qt layout reflows
         if (self.scrollbar.maximum() != total or 
@@ -223,7 +250,7 @@ class PyqTerminal(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.scrollbar.setGeometry(self.width() - 12, 0, 12, self.height())
+        self.scrollbar.setGeometry(self.width() - 14, 0, 14, self.height())
         self._recalculate_size()
         QGuiApplication.inputMethod().update(Qt.InputMethodQuery.ImCursorRectangle)
 
@@ -238,8 +265,10 @@ class PyqTerminal(QWidget):
     def _recalculate_size(self):
         if self.char_width == 0 or self.char_height == 0:
             return
-            
-        new_cols = int((self.width() - 2 * self.padding) // self.char_width)
+        scrollbar_width = self.scrollbar.width() if hasattr(self, 'scrollbar') and self.scrollbar.isVisible() else 0
+        available_width = self.width() - scrollbar_width
+        
+        new_cols = int((available_width - 2 * self.padding) // self.char_width)
         new_rows = int((self.height() - 2 * self.padding) // self.char_height)
         
         if new_cols != self.cols or new_rows != self.rows:
